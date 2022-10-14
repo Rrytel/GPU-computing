@@ -41,17 +41,20 @@ public:
     width = sub_size;
     stride = A.width;
     // memory at spot
-    elements = &A.elements[stride * width * row];
+    elements = &A.elements[sub_size * width + row];
+    
+    
   }
   // Get matrix element
   __device__ inline float GetElem(const int row) {
-    return elements[row * stride];
+     return elements[row];
   }
 
   // Set a matrix element
   __device__ inline void SetElem(const int row,
                                  const float value) {
-    elements[row * stride] = value;
+     elements[row] = value;
+    
   }
 };
 #endif

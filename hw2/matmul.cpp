@@ -1,5 +1,3 @@
-/*Matmul routine for AMS148, written by Steven Reeves, March 10 2018,
-  major routines referenced from CUDA Programming Guide. */
 
 #include <cstring>
 #include <ctime>
@@ -31,10 +29,6 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C);
 
 /* Shared Matrix Multiplication Routines */
 
-/* MatMul with shared memory
-   :inputs: Matrix A, Matrix B
-   :outputs: Matrix C = AB
- */
 void MatMul(const CMat A, const CMat B, CMat C) {
   int Gpu = 1;
   // Load A and B to device memory
@@ -85,8 +79,10 @@ void MatVec(const CMat A, const CVec B, CVec C) {
   dB.load(B);
 
   // Invoke Kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
+  //dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 dimBlock(BLOCK_SIZE);
+  //dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
+  dim3 dimGrid(B.width / dimBlock.x);
   // Use HIP Events for timing
   hipEvent_t start, stop;
   float time;
@@ -104,8 +100,10 @@ void MatVec(const CMat A, const CVec B, CVec C) {
   // Read C from Device memory
   C.load(dC);
 
-  //std::cout <<C.elements[0] << std::endl;
-
+  for(int i = 0; i < C.width; i++)
+  {
+    std::cout <<i<<":" <<C.elements[i] << std::endl;
+  }
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -172,7 +170,7 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
 
   // Block row and column;
   int blockRow = blockIdx.y;
-  int blockCol = blockIdx.x;
+  //int blockCol = blockIdx.x;
 
   // Thread block computes one sub matrix Csub of C
   subVector cSub(C, BLOCK_SIZE, blockRow);
@@ -183,7 +181,7 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
 
   // Thread row and column index within the submatrix
   int row = threadIdx.y;
-  int col = threadIdx.x;
+  //int col = threadIdx.x;
 
   // Loop over submatrices of A and B that are required for Csub
   // Multiply each pair of sub-matrices together
@@ -197,8 +195,13 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
     subVector bSub(B, BLOCK_SIZE, m);
 
     // Load Asub and Bsub from global memory into shared;
+    int col = 0;
+    for(int i = 0; i < BLOCK_SIZE; i++)
+    {
+       col = m*BLOCK_SIZE +i;
+       aS[row][col] = aSub.GetElem(row, col);
+    }
 
-    aS[row][col] = aSub.GetElem(row, col);
     bS[row] = bSub.GetElem(row);
 
     // Always sync threads when loading shared memory before doing computation
@@ -304,6 +307,10 @@ void NaiveMatVec(const CMat A, const CVec B, CVec C) {
   std::cout << " Naive GPU MatVec Time = " << elapsedSecs << "ms" << std::endl;
   // Read C from device memory
   C.load(dC);
+  for(int i = 0; i < C.width; i++)
+  {
+    std::cout <<i<<":" <<C.elements[i] << std::endl;
+  }
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -335,14 +342,15 @@ void CPUMatMul(const CMat A, const CMat B, CMat C) {
   }
 }
 
-void CPUMatVec(const CMat A, const CVec B, CVec C) {
+void CPUMatVec(const CMat A, const CVec B, CVec& C) {
   int i, j;
   for (i = 0; i < A.width; i++) {
     float cValue = 0.0f;
     for (j = 0; j < A.height; j++) {
       cValue += A.elements[i * A.width + j] * B.elements[j];
     }
-    C.elements[i * C.width + j] = cValue;
+    //std::cout <<i<<":" <<cValue << std::endl;
+    C.elements[i] = cValue;
   }
 }
 
@@ -365,6 +373,7 @@ int main() {
 
 
 
+
   //CMat A2(N,N,1.f);
   //CVec B2(N,2.f);
   //CVec C2(N), nC2(N);
@@ -382,7 +391,7 @@ int main() {
   CVec B3(1024,1);
   CVec C3(1024), nC3(1024);
   NaiveMatVec(A3,B3,nC3);
-  //MatVec(A3,B3,nC3);
+  MatVec(A3,B3,nC3);
 
   //Third test case
   CMat A4(2048,2048,1);
@@ -393,7 +402,7 @@ int main() {
   }
   CVec B4(2048,1.5);
   CVec C4(2048), nC4(2048);
-  NaiveMatVec(A4,B4,nC4);
+  //NaiveMatVec(A4,B4,nC4);
   //MatVec(A4,B4,nC4);
 
 // Call matrix multiplication.
@@ -414,8 +423,8 @@ int main() {
 #endif
 
   // Naive HIP
-  NaiveMatMul(A, B, nC);
+  //NaiveMatMul(A, B, nC);
 
   // With LDS
-  MatMul(A, B, C);
+  //MatMul(A, B, C);
 }
