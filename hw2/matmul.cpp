@@ -100,10 +100,10 @@ void MatVec(const CMat A, const CVec B, CVec C) {
   // Read C from Device memory
   C.load(dC);
 
-  for(int i = 0; i < C.width; i++)
+  /*for(int i = 0; i < C.width; i++)
   {
     std::cout <<i<<":" <<C.elements[i] << std::endl;
-  }
+  }*/
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -169,30 +169,24 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
   __shared__ float bS[BLOCK_SIZE];
 
   // Block row and column;
-  int blockRow = blockIdx.y;
-  int blockCol = blockIdx.x;
+  
+  int blockRow = blockIdx.x;
 
   // Thread block computes one sub matrix Csub of C
-  subVector cSub(C, BLOCK_SIZE, blockCol);
+  subVector cSub(C, BLOCK_SIZE, blockRow);
 
   // Each thread computes one element of Csub
   // By accumulating results into Cvalue
   float cValue = 0.0f;
 
   // Thread row and column index within the submatrix
-  int row = threadIdx.y;
-  //int row = blockIdx.x * blockDim.x + threadIdx.x;
-  //int col = threadIdx.x;
+  int row = threadIdx.x;
 
   // Loop over submatrices of A and B that are required for Csub
   // Multiply each pair of sub-matrices together
   // and summ the results
   
   for (int m = 0; m < (A.width / BLOCK_SIZE); m++) {
-
-   
-
-
 
     // Get A submatrix
     subMatrix aSub(A, BLOCK_SIZE, blockRow, m);
@@ -201,17 +195,13 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
     subVector bSub(B, BLOCK_SIZE, m);
 
     // Load Asub and Bsub from global memory into shared;
-    int col = 0;
     for(int i = 0; i < BLOCK_SIZE; i++)
     {
-       col = m*BLOCK_SIZE +i;
-       aS[row][col] = aSub.GetElem(row, col);
+       aS[row][i] = aSub.GetElem(row, i);
     }
  
-    
     bS[row] = bSub.GetElem(row);
-    //bS[row] = B.elements[m*BLOCK_SIZE+row];
-
+    
     // Always sync threads when loading shared memory before doing computation
     __syncthreads();
 
@@ -224,9 +214,7 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
   }
   // write Csub back into global memory
   // each thread writes one element
-  //cSub.SetElem(row, cValue);
-  C.elements[blockIdx.x * blockDim.x + threadIdx.x]= cValue;
-  
+  cSub.SetElem(row, cValue);  
 }
 
 //Matrix matrix naive kernel
@@ -317,10 +305,11 @@ void NaiveMatVec(const CMat A, const CVec B, CVec C) {
   std::cout << " Naive GPU MatVec Time = " << elapsedSecs << "ms" << std::endl;
   // Read C from device memory
   C.load(dC);
-  for(int i = 0; i < C.width; i++)
+
+  /*for(int i = 0; i < C.width; i++)
   {
     //std::cout <<i<<":" <<C.elements[i] << std::endl;
-  }
+  }*/
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -381,16 +370,6 @@ int main() {
   NaiveMatVec(A2,B2,nC2);
   MatVec(A2,B2,nC2);
 
-
-
-
-  //CMat A2(N,N,1.f);
-  //CVec B2(N,2.f);
-  //CVec C2(N), nC2(N);
-  //NaiveMatVec(A2,B2,nC2);
-  //MatVec(A2,B2,nC2);
-  
-
   //Second test case
   CMat A3(1024,1024);
   for (int i = 0; i < A3.width; i++) {
@@ -400,8 +379,8 @@ int main() {
   }
   CVec B3(1024,1);
   CVec C3(1024), nC3(1024);
-  //NaiveMatVec(A3,B3,nC3);
-  //MatVec(A3,B3,nC3);
+  NaiveMatVec(A3,B3,nC3);
+  MatVec(A3,B3,nC3);
 
   //Third test case
   CMat A4(2048,2048,1);
@@ -412,8 +391,8 @@ int main() {
   }
   CVec B4(2048,1.5);
   CVec C4(2048), nC4(2048);
-  //NaiveMatVec(A4,B4,nC4);
-  //MatVec(A4,B4,nC4);
+  NaiveMatVec(A4,B4,nC4);
+  MatVec(A4,B4,nC4);
 
 // Call matrix multiplication.
 #if 0
