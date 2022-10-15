@@ -41,7 +41,7 @@ public:
     width = sub_size;
     stride = A.width;
     // memory at spot
-    elements = &A.elements[sub_size * width + row];
+    elements = &A.elements[sub_size * row];
     
     
   }

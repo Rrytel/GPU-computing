@@ -170,10 +170,10 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
 
   // Block row and column;
   int blockRow = blockIdx.y;
-  //int blockCol = blockIdx.x;
+  int blockCol = blockIdx.x;
 
   // Thread block computes one sub matrix Csub of C
-  subVector cSub(C, BLOCK_SIZE, blockRow);
+  subVector cSub(C, BLOCK_SIZE, blockCol);
 
   // Each thread computes one element of Csub
   // By accumulating results into Cvalue
@@ -181,12 +181,18 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
 
   // Thread row and column index within the submatrix
   int row = threadIdx.y;
+  //int row = blockIdx.x * blockDim.x + threadIdx.x;
   //int col = threadIdx.x;
 
   // Loop over submatrices of A and B that are required for Csub
   // Multiply each pair of sub-matrices together
   // and summ the results
+  
   for (int m = 0; m < (A.width / BLOCK_SIZE); m++) {
+
+   
+
+
 
     // Get A submatrix
     subMatrix aSub(A, BLOCK_SIZE, blockRow, m);
@@ -201,8 +207,10 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
        col = m*BLOCK_SIZE +i;
        aS[row][col] = aSub.GetElem(row, col);
     }
-
+ 
+    
     bS[row] = bSub.GetElem(row);
+    //bS[row] = B.elements[m*BLOCK_SIZE+row];
 
     // Always sync threads when loading shared memory before doing computation
     __syncthreads();
@@ -216,7 +224,9 @@ __global__ void MatVecKernel(const GMat A, const GVec B, GVec C){
   }
   // write Csub back into global memory
   // each thread writes one element
-  cSub.SetElem(row, cValue);
+  //cSub.SetElem(row, cValue);
+  C.elements[blockIdx.x * blockDim.x + threadIdx.x]= cValue;
+  
 }
 
 //Matrix matrix naive kernel
@@ -309,7 +319,7 @@ void NaiveMatVec(const CMat A, const CVec B, CVec C) {
   C.load(dC);
   for(int i = 0; i < C.width; i++)
   {
-    std::cout <<i<<":" <<C.elements[i] << std::endl;
+    //std::cout <<i<<":" <<C.elements[i] << std::endl;
   }
   // Free device memory
   dA.deAllocate();
@@ -390,8 +400,8 @@ int main() {
   }
   CVec B3(1024,1);
   CVec C3(1024), nC3(1024);
-  NaiveMatVec(A3,B3,nC3);
-  MatVec(A3,B3,nC3);
+  //NaiveMatVec(A3,B3,nC3);
+  //MatVec(A3,B3,nC3);
 
   //Third test case
   CMat A4(2048,2048,1);
