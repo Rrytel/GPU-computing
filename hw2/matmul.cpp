@@ -100,10 +100,8 @@ void MatVec(const CMat A, const CVec B, CVec C) {
   // Read C from Device memory
   C.load(dC);
 
-  /*for(int i = 0; i < C.width; i++)
-  {
-    std::cout <<i<<":" <<C.elements[i] << std::endl;
-  }*/
+  std::cout <<"First element of LDS MatVec"<<":" <<C.elements[0] << std::endl;
+  
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -234,7 +232,7 @@ __global__ void NaiveVecKernel(const GMat A, const GVec B, GVec C) {
   // Each Thread computes one element of C
   // by accumulating results into Cvalue
   float cValue = 0.0f;
-  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int row = blockIdx.x * blockDim.x + threadIdx.x;
   //int col = blockIdx.x * blockDim.x + threadIdx.x;
   for (int e = 0; e < A.width; e++)
     cValue += A.elements[row * A.width + e] * B.elements[e];
@@ -252,8 +250,9 @@ void NaiveMatMul(const CMat A, const CMat B, CMat C) {
   GMat dC(C.width, C.height);
 
   // Invoke kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
+  dim3 dimBlock(BLOCK_SIZE);
+  dim3 dimGrid(B.width / dimBlock.x);
+  
 
   // Use hipEvent type for timing
 
@@ -270,6 +269,7 @@ void NaiveMatMul(const CMat A, const CMat B, CMat C) {
   std::cout << " Naive GPU MatMul Time = " << elapsedSecs << "ms" << std::endl;
   // Read C from device memory
   C.load(dC);
+  
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -287,8 +287,8 @@ void NaiveMatVec(const CMat A, const CVec B, CVec C) {
   GVec dC(C.width);
 
   // Invoke kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
+  dim3 dimBlock(BLOCK_SIZE);
+  dim3 dimGrid(B.width / dimBlock.x);
 
   // Use hipEvent type for timing
 
@@ -306,10 +306,9 @@ void NaiveMatVec(const CMat A, const CVec B, CVec C) {
   // Read C from device memory
   C.load(dC);
 
-  /*for(int i = 0; i < C.width; i++)
-  {
-    //std::cout <<i<<":" <<C.elements[i] << std::endl;
-  }*/
+
+  std::cout <<"First element of naive MatVec"<<":" <<C.elements[0] << std::endl;
+
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -367,9 +366,19 @@ int main() {
   CMat A2(128,128,1);
   CVec B2(128,2);
   CVec C2(128), nC2(128);
+  
+  clock_t sstart = clock();	//Serial Start
+  CPUMatVec(A2,B2,nC2);
+  clock_t send = clock(); 	//Serial End
+  double serial = double(send - sstart) / CLOCKS_PER_SEC;	
+  std::cout<< " Serial Time = " << serial*1000 << "ms" << std::endl;
+  std::cout <<"First element of serial MatVec"<<":" <<nC2.elements[0] << std::endl;
+ 
   NaiveMatVec(A2,B2,nC2);
   MatVec(A2,B2,nC2);
+  std::cout << std::endl;
 
+  
   //Second test case
   CMat A3(1024,1024);
   for (int i = 0; i < A3.width; i++) {
@@ -379,9 +388,18 @@ int main() {
   }
   CVec B3(1024,1);
   CVec C3(1024), nC3(1024);
+
+  
+  sstart = clock();	//Serial Start
+  CPUMatVec(A3,B3,nC3);
+  send = clock(); 	//Serial End
+  serial = double(send - sstart) / CLOCKS_PER_SEC;	
+  std::cout<< " Serial Time = " << serial*1000 << "ms" << std::endl;
+  std::cout <<"First element of serial MatVec"<<":" <<nC3.elements[0] << std::endl;
+  
   NaiveMatVec(A3,B3,nC3);
   MatVec(A3,B3,nC3);
-
+  std::cout << std::endl;
   //Third test case
   CMat A4(2048,2048,1);
   for (int i = 0; i < A4.width; i++) {
@@ -391,29 +409,15 @@ int main() {
   }
   CVec B4(2048,1.5);
   CVec C4(2048), nC4(2048);
+
+  sstart = clock();	//Serial Start
+  CPUMatVec(A4,B4,nC4);
+  send = clock(); 	//Serial End
+  serial = double(send - sstart) / CLOCKS_PER_SEC;	
+  std::cout<< " Serial Time = " << serial*1000 << "ms" << std::endl;
+  std::cout <<"First element of serial MatVec"<<":" <<nC4.elements[0] << std::endl;
+  
   NaiveMatVec(A4,B4,nC4);
   MatVec(A4,B4,nC4);
 
-// Call matrix multiplication.
-#if 0
-    CMat Ds(N, N), D(N,N);
-//Serial 
-	clock_t sstart = clock();	//Serial Start
-	serialMatMul(A,B,Ds);
-	clock_t send = clock(); 	//Serial End
-	double serial = double(send - sstart) / CLOCKS_PER_SEC;	
-	std::cout<< " Serial Time = " << serial << "s" << std::endl;
-//OpenMP
-	clock_t begin = clock();	
-	CPUMatMul(A,B,D);
-	clock_t end = clock();
-	double fullcpu = double(end - begin) / (CLOCKS_PER_SEC*12);
-	std::cout<< " CPU Time = " << fullcpu << "s" << std::endl;
-#endif
-
-  // Naive HIP
-  //NaiveMatMul(A, B, nC);
-
-  // With LDS
-  //MatMul(A, B, C);
 }
