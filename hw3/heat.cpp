@@ -7,23 +7,32 @@
 #include <string>
 #include <vector>
 #include "mat.h"
+#include "CImg.h"
 
 #define M 1024
 #define BLOCK_SIZE 16
+using GMat3 = GpuMatrix3;
+using CMat3 = CpuMatrix3;
 using GMat = GpuMatrix;
 using CMat = CpuMatrix;
+using namespace cimg_library;
 
-__global__ void BlurrKernel(const GMat In, const GMat Filter, GMat Out);
+__global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out);
 
 
-__global__ void BlurrKernel(const GMat In, const GMat Filter, GMat Out)
+__global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    float pixelValue = 0.0f;
+    float3 pixelValue;
+    pixelValue.x = 0.0f;
+    pixelValue.y = 0.0f;
+    pixelValue.z = 0.0f;
     if(row == 0 || row == In.height-1 || col == 0 || col == In.width-1)
     {
-       pixelValue = In.elements[row*In.width+col];
+       pixelValue.x = In.elements[row*In.width+col].x;
+       pixelValue.y = In.elements[row*In.width+col].y;
+       pixelValue.z = In.elements[row*In.width+col].z;
     }
     else
     {
@@ -31,15 +40,17 @@ __global__ void BlurrKernel(const GMat In, const GMat Filter, GMat Out)
       {
 	for(int v = -1; v < 2; v++)
         {
-           pixelValue+= In.elements[(row+u)*In.width+(col+v)]*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.x += In.elements[(row+u)*In.width+(col+v)].x*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.y += In.elements[(row+u)*In.width+(col+v)].y*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.z += In.elements[(row+u)*In.width+(col+v)].z*Filter.elements[(u+1)*Filter.width+(v+1)];
         }
       }
 
     }
     
-    
-    Out.elements[row*Out.width+col] = pixelValue;
-
+    Out.elements[row*Out.width+col].x = pixelValue.x;
+    Out.elements[row*Out.width+col].y = pixelValue.y;
+    Out.elements[row*Out.width+col].z = pixelValue.z;
 }
 
 /*
@@ -64,22 +75,22 @@ void IoFun(std::string file, std::vector<float> x, std::vector<float> f) {
 }
 
 
-void Blurr(const CMat A, const CMat B, CMat C) {
+void Blurr(const CMat3 A, const CMat B, CMat3 C) {
   // Load A and B to device memory
-  GMat dA(A.width, A.height);
+  GMat3 dA(A.width, A.height);
   dA.load(A);
   GMat dB(B.width, B.height);
   dB.load(B);
 
   // Allocate C in device memory
-  GMat dC(C.width, C.height);
+  GMat3 dC(C.width, C.height);
 
   // Invoke kernel
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
   dim3 dimGrid(A.width / dimBlock.x, A.height / dimBlock.y);
 
   // Use hipEvent type for timing
-  std::cout << A.elements[0]<< std::endl;
+  std::cout << A.elements[0].x<< std::endl;
 
   BlurrKernel<<<dimGrid, dimBlock>>>(dA, dB, dC);
 
@@ -90,11 +101,11 @@ void Blurr(const CMat A, const CMat B, CMat C) {
   {
     for(int j = 0; j < C.height; j++)
     {
-     std::cout << C.elements[i*C.width+j]<< "  ";
+     std::cout << C.elements[i*C.width+j].x<< "  ";
     }
     std::cout<< std::endl;
   }
-  std::cout << C.elements[4*C.width+5]<<std::endl;
+  
   // Free device memory
   dA.deAllocate();
   dB.deAllocate();
@@ -106,7 +117,19 @@ void Blurr(const CMat A, const CMat B, CMat C) {
 */
 int main() {
 
-   CMat Image(48,48, 5.f);
+
+   CImg<unsigned char> src("ana_noise.bmp");
+   int width = src.width();
+   int height = src.height();
+   size_t size = src.size();//width*height*sizeof(unsigned char);
+
+   unsigned char *h_src = src.data();
+
+   
+   std::cout << "Main " << h_src[0] << std::endl;
+
+
+   CMat3 Image(48,48);
    CMat Filter(3,3,0.f);
    Filter.elements[0]= .0625f;
    Filter.elements[1]= .125;
@@ -117,7 +140,7 @@ int main() {
    Filter.elements[6]= .0625f;
    Filter.elements[7]= .125;
    Filter.elements[8]= .0625f;
-   CMat Output(48,48,0.f);
+   CMat3 Output(48,48);
    Blurr(Image,Filter,Output);
 
 }

@@ -17,7 +17,9 @@ public:
 };
 
 class CpuMatrix;
+class CpuMatrix3;
 class GpuMatrix;
+class GpuMatrix3;
 class CpuVector;
 class GpuVector;
 
@@ -35,6 +37,22 @@ public:
   void load(const CpuMatrix oldMatrix);
   void deAllocate();
 };
+
+class GpuMatrix3 : public Matrix {
+public:
+  float3 *elements;
+
+  /* Constructor */
+  GpuMatrix3(const int w, const int h) {
+    width = w;
+    height = h;
+    hipMalloc(&elements, width * height * sizeof(float3));
+  }
+
+  void load(const CpuMatrix3 oldMatrix);
+  void deAllocate();
+};
+
 
 class GpuVector : public Vector {
 public:
@@ -61,6 +79,20 @@ public:
   }
 
   void load(const GpuMatrix oldMatrix);
+  void deAllocate();
+};
+
+class CpuMatrix3 : public Matrix {
+public:
+  std::vector<float3> elements;
+  /* Constructor */
+  CpuMatrix3(const int w, const int h, const float val = 0) {
+    width = w;
+    height = h;
+    elements.resize(w * h);
+  }
+
+  void load(const GpuMatrix3 oldMatrix);
   void deAllocate();
 };
 
