@@ -17,10 +17,10 @@ using GMat = GpuMatrix;
 using CMat = CpuMatrix;
 using namespace cimg_library;
 
-__global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out);
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out);
 
 
-__global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out)
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -30,9 +30,13 @@ __global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out)
     pixelValue.z = 0.0f;
     if(row == 0 || row == In.height-1 || col == 0 || col == In.width-1)
     {
-       pixelValue.x = In.elements[row*In.width+col].x;
-       pixelValue.y = In.elements[row*In.width+col].y;
-       pixelValue.z = In.elements[row*In.width+col].z;
+       //pixelValue.x = In.elements[row*In.width+col].x;
+       //pixelValue.y = In.elements[row*In.width+col].y;
+       //pixelValue.z = In.elements[row*In.width+col].z;
+       pixelValue.x = (unsigned int)(in[row * width + col]);
+       pixelValue.y = (unsigned int)(in[(row + height) * width + col]);
+       pixelValue.z = (unsigned int)(in[(row + height*2) * width + col]);
+       
     }
     else
     {
@@ -40,9 +44,12 @@ __global__ void BlurrKernel(const GMat3 In, const GMat Filter, GMat3 Out)
       {
 	for(int v = -1; v < 2; v++)
         {
-           pixelValue.x += In.elements[(row+u)*In.width+(col+v)].x*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.y += In.elements[(row+u)*In.width+(col+v)].y*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.z += In.elements[(row+u)*In.width+(col+v)].z*Filter.elements[(u+1)*Filter.width+(v+1)];
+           //pixelValue.x += In.elements[(row+u)*In.width+(col+v)].x*Filter.elements[(u+1)*Filter.width+(v+1)];
+           //pixelValue.y += In.elements[(row+u)*In.width+(col+v)].y*Filter.elements[(u+1)*Filter.width+(v+1)];
+           //pixelValue.z += In.elements[(row+u)*In.width+(col+v)].z*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.x += (unsigned int)(in[row * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.y += (unsigned int)(in[(row + height) * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.z += (unsigned int)(in[(row + height*2) * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
         }
       }
 
@@ -75,7 +82,7 @@ void IoFun(std::string file, std::vector<float> x, std::vector<float> f) {
 }
 
 
-void Blurr(const CMat3 A, const CMat B, CMat3 C) {
+void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const CMat B, CMat3 C) {
   // Load A and B to device memory
   GMat3 dA(A.width, A.height);
   dA.load(A);
@@ -92,7 +99,7 @@ void Blurr(const CMat3 A, const CMat B, CMat3 C) {
   // Use hipEvent type for timing
   std::cout << A.elements[0].x<< std::endl;
 
-  BlurrKernel<<<dimGrid, dimBlock>>>(dA, dB, dC);
+  BlurrKernel<<<dimGrid, dimBlock>>>(in, width, height,dA, dB, dC);
 
   // Read C from device memory
   C.load(dC);
@@ -112,9 +119,6 @@ void Blurr(const CMat3 A, const CMat B, CMat3 C) {
   dC.deAllocate();
 }
 
-/*
-    Driver function to simulate the heat profile in a 1-D bar.
-*/
 int main() {
 
 
@@ -123,7 +127,17 @@ int main() {
    int height = src.height();
    size_t size = src.size();//width*height*sizeof(unsigned char);
 
-   unsigned char *h_src = src.data();
+    unsigned char *h_src = src.data();
+ 
+    //unsigned int *h_histo = new unsigned int[NUM_BINS*3];
+
+    unsigned char *d_src;
+    unsigned int  *d_histo;
+
+    hipMalloc((void**)&d_src, size);
+    //hipMalloc((void**)&d_histo, NUM_BINS*3*sizeof(unsigned int));
+
+    hipMemcpy(d_src, h_src, size, hipMemcpyHostToDevice);
 
    
    std::cout << "Main " << h_src[0] << std::endl;
@@ -141,6 +155,6 @@ int main() {
    Filter.elements[7]= .125;
    Filter.elements[8]= .0625f;
    CMat3 Output(48,48);
-   Blurr(Image,Filter,Output);
+   Blurr(d_src,width, height, Image,Filter,Output);
 
 }
