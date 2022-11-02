@@ -17,10 +17,11 @@ using GMat = GpuMatrix;
 using CMat = CpuMatrix;
 using namespace cimg_library;
 
-__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out);
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out);
+__global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, const unsigned char *origImg, GMat L2);
 
 
-__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out)
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out)
 {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -58,6 +59,10 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
     Out.elements[row*Out.width+col].x = pixelValue.x;
     Out.elements[row*Out.width+col].y = pixelValue.y;
     Out.elements[row*Out.width+col].z = pixelValue.z;
+
+    out[row * width + col] = pixelValue.x;
+    out[(row + height) * width + col] = pixelValue.y;
+    out[in[(row + height*2) * width + col]] = pixelValue.z;
 }
 
 /*
@@ -81,8 +86,57 @@ void IoFun(std::string file, std::vector<float> x, std::vector<float> f) {
   myFileTsN.close();
 }
 
+__global__ void L2Kernel(const unsigned char *blurImg, int width, int height, const unsigned char *origImg, GMat L2)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    float3 pixelValueB;
+    pixelValueB.x = 0.0f;
+    pixelValueB.y = 0.0f;
+    pixelValueB.z = 0.0f;
+    pixelValueB.x = (unsigned int)(blurImg[row * width + col]);
+    pixelValueB.y = (unsigned int)(blurImg[(row + height) * width + col]);
+    pixelValueB.z = (unsigned int)(blurImg[(row + height*2) * width + col]);
 
-void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const CMat B, CMat3 C) {
+
+    float3 pixelValueO;
+    pixelValueO.x = 0.0f;
+    pixelValueO.y = 0.0f;
+    pixelValueO.z = 0.0f;
+    pixelValueO.x = (unsigned int)(origImg[row * width + col]);
+    pixelValueO.y = (unsigned int)(origImg[(row + height) * width + col]);
+    pixelValueO.z = (unsigned int)(origImg[(row + height*2) * width + col]);
+
+    float temp = (pixelValueB.x+pixelValueB.y+pixelValueB.z) - (pixelValueO.x+pixelValueO.y+pixelValueO.z);
+    temp *= temp;
+
+    L2.elements[row*L2.width+col] = temp;
+
+}
+
+
+
+void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned char *origImg)
+{
+  CMat CL2(width, height);
+  GMat L2(width, height);
+  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 dimGrid(width / dimBlock.x, height / dimBlock.y);
+  L2Kernel<<<dimGrid, dimBlock>>>(blurImg,width,height,origImg,L2);
+  CL2.load(L2);
+    for(int i =0; i < L2.width; i++)
+    {
+      for(int j = 0; j < L2.height; j++)
+      {
+      std::cout << L2.elements[i*L2.width+j]<< "  ";
+      }
+    std::cout<< std::endl;
+  }
+
+}
+
+
+void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const CMat B, CMat3 C, unsigned char *out) {
   // Load A and B to device memory
   GMat3 dA(A.width, A.height);
   dA.load(A);
@@ -92,26 +146,32 @@ void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const 
   // Allocate C in device memory
   GMat3 dC(C.width, C.height);
 
+  
+
   // Invoke kernel
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(A.width / dimBlock.x, A.height / dimBlock.y);
+  dim3 dimGrid(width / dimBlock.x, height / dimBlock.y);
 
-  // Use hipEvent type for timing
-  std::cout << A.elements[0].x<< std::endl;
+  
+  //std::cout << A.elements[0].x<< std::endl;
 
-  BlurrKernel<<<dimGrid, dimBlock>>>(in, width, height,dA, dB, dC);
+  BlurrKernel<<<dimGrid, dimBlock>>>(in, width, height,dA, dB, dC,out);
 
   // Read C from device memory
   C.load(dC);
+  
   
   for(int i =0; i < C.width; i++)
   {
     for(int j = 0; j < C.height; j++)
     {
-     std::cout << C.elements[i*C.width+j].x<< "  ";
+     //std::cout << C.elements[i*C.width+j].x<< "  ";
     }
-    std::cout<< std::endl;
+    //std::cout<< std::endl;
   }
+
+
+
   
   // Free device memory
   dA.deAllocate();
@@ -123,26 +183,34 @@ int main() {
 
 
    CImg<unsigned char> src("ana_noise.bmp");
+   CImg<unsigned char> out("ana_noise.bmp");
+   CImg<unsigned char> original("ana_sbk.bmp");
    int width = src.width();
    int height = src.height();
    size_t size = src.size();//width*height*sizeof(unsigned char);
 
     unsigned char *h_src = src.data();
- 
-    //unsigned int *h_histo = new unsigned int[NUM_BINS*3];
+    unsigned char *h_out = out.data();
+    unsigned char *h_orig = original.data();
 
     unsigned char *d_src;
-    unsigned int  *d_histo;
+    unsigned char *d_out;
+    unsigned char *d_orig;
+    
 
     hipMalloc((void**)&d_src, size);
-    //hipMalloc((void**)&d_histo, NUM_BINS*3*sizeof(unsigned int));
+    hipMalloc((void**)&d_out, size);
+    hipMalloc((void**)&d_orig, size);
 
     hipMemcpy(d_src, h_src, size, hipMemcpyHostToDevice);
+    hipMemcpy(d_out, h_out, size, hipMemcpyHostToDevice);
+    hipMemcpy(d_orig, h_orig, size, hipMemcpyHostToDevice);
 
-   
-   std::cout << "Main " << h_src[0] << std::endl;
+   //std::cout << "Main " << src[0] << std::endl;
+   //std::cout << "Main " << h_out[0] << std::endl;
 
 
+   //Create filter
    CMat3 Image(48,48);
    CMat Filter(3,3,0.f);
    Filter.elements[0]= .0625f;
@@ -155,6 +223,7 @@ int main() {
    Filter.elements[7]= .125;
    Filter.elements[8]= .0625f;
    CMat3 Output(48,48);
-   Blurr(d_src,width, height, Image,Filter,Output);
+   Blurr(d_src,width, height, Image,Filter,Output,d_out);
+   L2Norm(d_out,width, height, d_orig);
 
 }
