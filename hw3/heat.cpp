@@ -19,6 +19,7 @@ using namespace cimg_library;
 
 __global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out);
 __global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, const unsigned char *origImg, GMat L2);
+__global__ void reduce(GMat d_out, GMat d_in);
 
 
 __global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out)
@@ -115,6 +116,29 @@ __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, co
 }
 
 
+__global__ void reduce(GMat d_out, GMat d_in)
+{
+    extern __shared__ float sdata[];
+    int myId = threadIdx.x + blockDim.x*blockIdx.x;
+    int tid  = threadIdx.x;
+    sdata[tid] = d_in.elements[myId];
+    __syncthreads();
+    for(int s = 1; s<blockDim.x; s*=2)
+    {
+	if(tid%(2*s)==0)
+        {
+	   sdata[tid] += sdata[tid+s];
+        }
+	__syncthreads();
+    }
+    if(tid == 0)
+    {
+        d_out.elements[blockIdx.x] = sdata[0];
+    }
+
+
+}
+
 
 void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned char *origImg)
 {
@@ -128,10 +152,20 @@ void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned 
     {
       for(int j = 0; j < L2.height; j++)
       {
-      std::cout << L2.elements[i*L2.width+j]<< "  ";
+      //std::cout << CL2.elements[i*L2.width+j]<< "  ";
       }
-    std::cout<< std::endl;
+    //std::cout<< std::endl;
   }
+  // Reduce
+  CMat Creduced(1024,1);
+  GMat reduced(1024,1);
+  dim3 dimBlockReduce(1024);
+  dim3 dimGridReduce((width*height+dimBlockReduce.x-1)/dimBlockReduce.x);
+  reduce<<<dimGridReduce,dimBlockReduce,1024*sizeof(float)>>>(reduced,L2);
+  CL2.load(L2);
+  Creduced.load(reduced);
+  std::cout<< sqrt(Creduced.elements[0]);
+  
 
 }
 
