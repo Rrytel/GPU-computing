@@ -30,7 +30,7 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
     pixelValue.x = 0.0f;
     pixelValue.y = 0.0f;
     pixelValue.z = 0.0f;
-    if(row == 0 || row == In.height-1 || col == 0 || col == In.width-1)
+    if(row == 0 || row == height-1 || col == 0 || col == width-1)
     {
        //pixelValue.x = In.elements[row*In.width+col].x;
        //pixelValue.y = In.elements[row*In.width+col].y;
@@ -49,9 +49,9 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
            //pixelValue.x += In.elements[(row+u)*In.width+(col+v)].x*Filter.elements[(u+1)*Filter.width+(v+1)];
            //pixelValue.y += In.elements[(row+u)*In.width+(col+v)].y*Filter.elements[(u+1)*Filter.width+(v+1)];
            //pixelValue.z += In.elements[(row+u)*In.width+(col+v)].z*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.x += (unsigned int)(in[row * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.y += (unsigned int)(in[(row + height) * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.z += (unsigned int)(in[(row + height*2) * width + col])*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.x += (unsigned int)(in[(row+u) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.y += (unsigned int)(in[((row+u) + height) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+           pixelValue.z += (unsigned int)(in[((row+u) + height*2) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
         }
       }
 
@@ -63,7 +63,7 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
 
     out[row * width + col] = pixelValue.x;
     out[(row + height) * width + col] = pixelValue.y;
-    out[in[(row + height*2) * width + col]] = pixelValue.z;
+    out[(row + height*2) * width + col] = pixelValue.z;
 }
 
 /*
@@ -164,7 +164,7 @@ void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned 
   reduce<<<dimGridReduce,dimBlockReduce,1024*sizeof(float)>>>(reduced,L2);
   CL2.load(L2);
   Creduced.load(reduced);
-  std::cout<< sqrt(Creduced.elements[0]);
+  std::cout<< "L2: " <<sqrt(Creduced.elements[0])<<std::endl;
   
 
 }
@@ -183,8 +183,8 @@ void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const 
   
 
   // Invoke kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(width / dimBlock.x, height / dimBlock.y);
+  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE,1);
+  dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y,1);
 
   
   //std::cout << A.elements[0].x<< std::endl;
@@ -217,11 +217,12 @@ int main() {
 
 
    CImg<unsigned char> src("ana_noise.bmp");
-   CImg<unsigned char> out("ana_noise.bmp");
+   //CImg<unsigned char> out("ana_noise.bmp");
    CImg<unsigned char> original("ana_sbk.bmp");
    int width = src.width();
    int height = src.height();
    size_t size = src.size();//width*height*sizeof(unsigned char);
+   CImg<unsigned char> out(width, height,1,3,0);
 
     unsigned char *h_src = src.data();
     unsigned char *h_out = out.data();
@@ -241,7 +242,7 @@ int main() {
     hipMemcpy(d_orig, h_orig, size, hipMemcpyHostToDevice);
 
    //std::cout << "Main " << src[0] << std::endl;
-   //std::cout << "Main " << h_out[0] << std::endl;
+   std::cout << "Main " << ((unsigned int)h_src[1*1199+5])*.25<< std::endl;
 
 
    //Create filter
@@ -258,6 +259,10 @@ int main() {
    Filter.elements[8]= .0625f;
    CMat3 Output(48,48);
    Blurr(d_src,width, height, Image,Filter,Output,d_out);
+   hipMemcpy(h_out, d_out, size, hipMemcpyDeviceToHost);
+   std::cout << "Main " << h_out[1*1199+5] << std::endl;
+   out.save("nonoise.bmp");
    L2Norm(d_out,width, height, d_orig);
+   L2Norm(d_src,width,height, d_orig);
 
 }
