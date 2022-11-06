@@ -17,7 +17,7 @@ using GMat = GpuMatrix;
 using CMat = CpuMatrix;
 using namespace cimg_library;
 
-__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out);
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat Filter, unsigned char *out);
 __global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, const unsigned char *origImg, GMat L2);
 __global__ void reduce(GMat d_out, GMat d_in);
 
@@ -83,7 +83,7 @@ __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, co
     pixelValueO.y = (unsigned int)(origImg[(row + height) * width + col]);
     pixelValueO.z = (unsigned int)(origImg[(row + height*2) * width + col]);
 
-    float temp = (pixelValueB.x+pixelValueB.y+pixelValueB.z) - (pixelValueO.x+pixelValueO.y+pixelValueO.z);
+    float temp = abs((pixelValueB.x+pixelValueB.y+pixelValueB.z) - (pixelValueO.x+pixelValueO.y+pixelValueO.z));
     temp *= temp;
 
     L2.elements[row*L2.width+col] = temp;
@@ -123,12 +123,21 @@ void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned 
    dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y);
    L2Kernel<<<dimGrid, dimBlock>>>(blurImg,width,height,origImg,L2);
    CL2.load(L2);
-   // Reduce
+   float sum = 0;
+   for(int i =0; i < CL2.width; i++)
+   {
+	for(int j =0; j<CL2.height; j++)
+        {
+           sum+= CL2.elements[i*CL2.width+j];
+        }
+   }
+   std::cout << "Serial Sum: " << sqrt(sum) <<std::endl;
    CMat Creduced(1024,1);
    GMat reduced(1024,1);
    dim3 dimBlockReduce(1024);
    dim3 dimGridReduce((width*height+dimBlockReduce.x-1)/dimBlockReduce.x);
    reduce<<<dimGridReduce,dimBlockReduce,1024*sizeof(float)>>>(reduced,L2);
+   reduce<<<1,dimBlockReduce,1024*sizeof(float)>>>(reduced,reduced);
    CL2.load(L2);
    Creduced.load(reduced);
    std::cout<< "L2: " <<sqrt(Creduced.elements[0])<<std::endl;
@@ -196,12 +205,15 @@ int main() {
    //Blurr(d_src,width, height, Image,Filter,Output,d_out);
    Blurr(d_src,width,height,Filter,d_out);
 
-   hipMemcpy(h_out, d_out, size, hipMemcpyDeviceToHost);
+   //hipMemcpy(h_out, d_out, size, hipMemcpyDeviceToHost);
   
    //Save blurred image
    out.save("nonoise.bmp");
+   std::cout << "Output vs Source :";
    L2Norm(d_out,width, height, d_src);
+   std::cout << "Output vs original :";
    L2Norm(d_out,width, height, d_orig);
+   std::cout << "Source vs original :";
    L2Norm(d_src,width,height, d_orig);
 
 }
