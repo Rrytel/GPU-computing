@@ -22,70 +22,45 @@ __global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, co
 __global__ void reduce(GMat d_out, GMat d_in);
 
 
-__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat3 In, const GMat Filter, GMat3 Out, unsigned char *out)
+__global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat Filter, unsigned char *out)
 {
-    int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int col = blockIdx.x * blockDim.x + threadIdx.x;
-    float3 pixelValue;
-    pixelValue.x = 0.0f;
-    pixelValue.y = 0.0f;
-    pixelValue.z = 0.0f;
-    if(row == 0 || row == height-1 || col == 0 || col == width-1)
-    {
-       //pixelValue.x = In.elements[row*In.width+col].x;
-       //pixelValue.y = In.elements[row*In.width+col].y;
-       //pixelValue.z = In.elements[row*In.width+col].z;
-       pixelValue.x = (unsigned int)(in[row * width + col]);
-       pixelValue.y = (unsigned int)(in[(row + height) * width + col]);
-       pixelValue.z = (unsigned int)(in[(row + height*2) * width + col]);
+   //Image width by height
+   int row = blockIdx.y * blockDim.y + threadIdx.y;
+   int col = blockIdx.x * blockDim.x + threadIdx.x;
+   float3 pixelValue;
+   pixelValue.x = 0.0f;
+   pixelValue.y = 0.0f;
+   pixelValue.z = 0.0f;
+   //Edge of image
+   if(row == 0 || row == height-1 || col == 0 || col == width-1)
+   {
+      //Load rgb pixel values for: input[row][col]
+      pixelValue.x = (unsigned int)(in[row * width + col]);
+      pixelValue.y = (unsigned int)(in[(row + height) * width + col]);
+      pixelValue.z = (unsigned int)(in[(row + height*2) * width + col]);
        
-    }
-    else
-    {
+   }
+   else
+   {
       for(int u = -1; u < 2; u ++)
       {
-	for(int v = -1; v < 2; v++)
-        {
-           //pixelValue.x += In.elements[(row+u)*In.width+(col+v)].x*Filter.elements[(u+1)*Filter.width+(v+1)];
-           //pixelValue.y += In.elements[(row+u)*In.width+(col+v)].y*Filter.elements[(u+1)*Filter.width+(v+1)];
-           //pixelValue.z += In.elements[(row+u)*In.width+(col+v)].z*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.x += (unsigned int)(in[(row+u) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.y += (unsigned int)(in[((row+u) + height) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
-           pixelValue.z += (unsigned int)(in[((row+u) + height*2) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
-        }
-      }
+         for(int v = -1; v < 2; v++)
+         {
+            //Enumerate rgb pixel values for: input[row+u][col+v]*Filter[u+1][v+1]
+            pixelValue.x += (unsigned int)(in[(row+u) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            pixelValue.y += (unsigned int)(in[((row+u) + height) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            pixelValue.z += (unsigned int)(in[((row+u) + height*2) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+         }
+       }
 
-    }
+   }
     
-    Out.elements[row*Out.width+col].x = pixelValue.x;
-    Out.elements[row*Out.width+col].y = pixelValue.y;
-    Out.elements[row*Out.width+col].z = pixelValue.z;
-
-    out[row * width + col] = pixelValue.x;
-    out[(row + height) * width + col] = pixelValue.y;
-    out[(row + height*2) * width + col] = pixelValue.z;
+   //Load rgb values into output[row][col]
+   out[row * width + col] = pixelValue.x;
+   out[(row + height) * width + col] = pixelValue.y;
+   out[(row + height*2) * width + col] = pixelValue.z;
 }
 
-/*
-    Kernel: Fills f_new with the contents of f_old
-    Inputs: FP32 array f_old, FP32 array f_new
-    Output: FP32 array f_new
-*/
-__global__ void Equate(float fOld[], const float fNew[]) {
-  int tId = threadIdx.x + blockIdx.x * blockDim.x;
-  fOld[tId] = fNew[tId];
-}
-
-void IoFun(std::string file, std::vector<float> x, std::vector<float> f) {
-  std::ofstream myFileTsN;
-  myFileTsN.open(file);
-  for (int i = 0; i < M; i++) {
-    myFileTsN << x[i] << '\t';
-    myFileTsN << f[i] << std::endl;
-  }
-
-  myFileTsN.close();
-}
 
 __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, const unsigned char *origImg, GMat L2)
 {
@@ -142,79 +117,44 @@ __global__ void reduce(GMat d_out, GMat d_in)
 
 void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned char *origImg)
 {
-  CMat CL2(width, height);
-  GMat L2(width, height);
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(width / dimBlock.x, height / dimBlock.y);
-  L2Kernel<<<dimGrid, dimBlock>>>(blurImg,width,height,origImg,L2);
-  CL2.load(L2);
-    for(int i =0; i < L2.width; i++)
-    {
-      for(int j = 0; j < L2.height; j++)
-      {
-      //std::cout << CL2.elements[i*L2.width+j]<< "  ";
-      }
-    //std::cout<< std::endl;
-  }
-  // Reduce
-  CMat Creduced(1024,1);
-  GMat reduced(1024,1);
-  dim3 dimBlockReduce(1024);
-  dim3 dimGridReduce((width*height+dimBlockReduce.x-1)/dimBlockReduce.x);
-  reduce<<<dimGridReduce,dimBlockReduce,1024*sizeof(float)>>>(reduced,L2);
-  CL2.load(L2);
-  Creduced.load(reduced);
-  std::cout<< "L2: " <<sqrt(Creduced.elements[0])<<std::endl;
+   CMat CL2(width, height);
+   GMat L2(width, height);
+   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
+   dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y);
+   L2Kernel<<<dimGrid, dimBlock>>>(blurImg,width,height,origImg,L2);
+   CL2.load(L2);
+   // Reduce
+   CMat Creduced(1024,1);
+   GMat reduced(1024,1);
+   dim3 dimBlockReduce(1024);
+   dim3 dimGridReduce((width*height+dimBlockReduce.x-1)/dimBlockReduce.x);
+   reduce<<<dimGridReduce,dimBlockReduce,1024*sizeof(float)>>>(reduced,L2);
+   CL2.load(L2);
+   Creduced.load(reduced);
+   std::cout<< "L2: " <<sqrt(Creduced.elements[0])<<std::endl;
   
 
 }
 
 
-void Blurr(const unsigned char *in, int width, int height, const CMat3 A, const CMat B, CMat3 C, unsigned char *out) {
-  // Load A and B to device memory
-  GMat3 dA(A.width, A.height);
-  dA.load(A);
-  GMat dB(B.width, B.height);
-  dB.load(B);
+void Blurr(const unsigned char *in, int width, int height, const CMat F, unsigned char *out) {
+    
+   //Load filter on GPU
+   GMat dF(F.width, F.height);
+   dF.load(F);
 
-  // Allocate C in device memory
-  GMat3 dC(C.width, C.height);
+   // Invoke kernel parameters
+   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE,1);
+   dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y,1);
 
-  
+   //GPU kernel call
+   BlurrKernel<<<dimGrid, dimBlock>>>(in, width, height,dF,out);
 
-  // Invoke kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE,1);
-  dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y,1);
-
-  
-  //std::cout << A.elements[0].x<< std::endl;
-
-  BlurrKernel<<<dimGrid, dimBlock>>>(in, width, height,dA, dB, dC,out);
-
-  // Read C from device memory
-  C.load(dC);
-  
-  
-  for(int i =0; i < C.width; i++)
-  {
-    for(int j = 0; j < C.height; j++)
-    {
-     //std::cout << C.elements[i*C.width+j].x<< "  ";
-    }
-    //std::cout<< std::endl;
-  }
-
-
-
-  
   // Free device memory
-  dA.deAllocate();
-  dB.deAllocate();
-  dC.deAllocate();
+    dF.deAllocate();
 }
 
 int main() {
-
 
    CImg<unsigned char> src("ana_noise.bmp");
    //CImg<unsigned char> out("ana_noise.bmp");
@@ -241,12 +181,7 @@ int main() {
     hipMemcpy(d_out, h_out, size, hipMemcpyHostToDevice);
     hipMemcpy(d_orig, h_orig, size, hipMemcpyHostToDevice);
 
-   //std::cout << "Main " << src[0] << std::endl;
-   std::cout << "Main " << ((unsigned int)h_src[1*1199+5])*.25<< std::endl;
-
-
    //Create filter
-   CMat3 Image(48,48);
    CMat Filter(3,3,0.f);
    Filter.elements[0]= .0625f;
    Filter.elements[1]= .125;
@@ -257,11 +192,15 @@ int main() {
    Filter.elements[6]= .0625f;
    Filter.elements[7]= .125;
    Filter.elements[8]= .0625f;
-   CMat3 Output(48,48);
-   Blurr(d_src,width, height, Image,Filter,Output,d_out);
+
+   //Blurr(d_src,width, height, Image,Filter,Output,d_out);
+   Blurr(d_src,width,height,Filter,d_out);
+
    hipMemcpy(h_out, d_out, size, hipMemcpyDeviceToHost);
-   std::cout << "Main " << h_out[1*1199+5] << std::endl;
+  
+   //Save blurred image
    out.save("nonoise.bmp");
+   L2Norm(d_out,width, height, d_src);
    L2Norm(d_out,width, height, d_orig);
    L2Norm(d_src,width,height, d_orig);
 
