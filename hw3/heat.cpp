@@ -19,7 +19,7 @@ using namespace cimg_library;
 
 __global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat Filter, unsigned char *out);
 __global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, const unsigned char *origImg, GMat L2);
-__global__ void reduce(GMat d_out, GMat d_in);
+__global__ void reduce(GMat dOut, GMat dIn);
 
 
 __global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat Filter, unsigned char *out)
@@ -35,9 +35,9 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
    if(row == 0 || row == height-1 || col == 0 || col == width-1)
    {
       //Load rgb pixel values for: input[row][col]
-      pixelValue.x = (unsigned int)(in[row * width + col]);
-      pixelValue.y = (unsigned int)(in[(row + height) * width + col]);
-      pixelValue.z = (unsigned int)(in[(row + height*2) * width + col]);
+      pixelValue.x = (float)(in[row * width + col]);
+      pixelValue.y = (float)(in[(row + height) * width + col]);
+      pixelValue.z = (float)(in[(row + height*2) * width + col]);
        
    }
    else
@@ -47,9 +47,9 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
          for(int v = -1; v < 2; v++)
          {
             //Enumerate rgb pixel values for: input[row+u][col+v]*Filter[u+1][v+1]
-            pixelValue.x += (unsigned int)(in[(row+u) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
-            pixelValue.y += (unsigned int)(in[((row+u) + height) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
-            pixelValue.z += (unsigned int)(in[((row+u) + height*2) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            pixelValue.x += (float)(in[(row+u) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            pixelValue.y += (float)(in[((row+u) + height) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            pixelValue.z += (float)(in[((row+u) + height*2) * width + (col+v)])*Filter.elements[(u+1)*Filter.width+(v+1)];
          }
        }
 
@@ -70,20 +70,19 @@ __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, co
     pixelValueB.x = 0.0f;
     pixelValueB.y = 0.0f;
     pixelValueB.z = 0.0f;
-    pixelValueB.x = (unsigned int)(blurImg[row * width + col]);
-    pixelValueB.y = (unsigned int)(blurImg[(row + height) * width + col]);
-    pixelValueB.z = (unsigned int)(blurImg[(row + height*2) * width + col]);
-
+    pixelValueB.x = (float)(blurImg[row * width + col]);
+    pixelValueB.y = (float)(blurImg[(row + height) * width + col]);
+    pixelValueB.z = (float)(blurImg[(row + height*2) * width + col]);
 
     float3 pixelValueO;
     pixelValueO.x = 0.0f;
     pixelValueO.y = 0.0f;
     pixelValueO.z = 0.0f;
-    pixelValueO.x = (unsigned int)(origImg[row * width + col]);
-    pixelValueO.y = (unsigned int)(origImg[(row + height) * width + col]);
-    pixelValueO.z = (unsigned int)(origImg[(row + height*2) * width + col]);
+    pixelValueO.x = (float)(origImg[row * width + col]);
+    pixelValueO.y = (float)(origImg[(row + height) * width + col]);
+    pixelValueO.z = (float)(origImg[(row + height*2) * width + col]);
 
-    float temp = abs((pixelValueB.x+pixelValueB.y+pixelValueB.z) - (pixelValueO.x+pixelValueO.y+pixelValueO.z));
+    float temp = ((abs(pixelValueB.x)+abs(pixelValueB.y)+abs(pixelValueB.z)) - (abs(pixelValueO.x)+abs(pixelValueO.y)+abs(pixelValueO.z)));
     temp *= temp;
 
     L2.elements[row*L2.width+col] = temp;
@@ -91,12 +90,12 @@ __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, co
 }
 
 
-__global__ void reduce(GMat d_out, GMat d_in)
+__global__ void reduce(GMat dOut, GMat dIn)
 {
     extern __shared__ float sdata[];
     int myId = threadIdx.x + blockDim.x*blockIdx.x;
     int tid  = threadIdx.x;
-    sdata[tid] = d_in.elements[myId];
+    sdata[tid] = dIn.elements[myId];
     __syncthreads();
     for(int s = 1; s<blockDim.x; s*=2)
     {
@@ -108,7 +107,7 @@ __global__ void reduce(GMat d_out, GMat d_in)
     }
     if(tid == 0)
     {
-        d_out.elements[blockIdx.x] = sdata[0];
+        dOut.elements[blockIdx.x] = sdata[0];
     }
 
 
@@ -173,22 +172,22 @@ int main() {
    size_t size = src.size();//width*height*sizeof(unsigned char);
    CImg<unsigned char> out(width, height,1,3,0);
 
-    unsigned char *h_src = src.data();
-    unsigned char *h_out = out.data();
-    unsigned char *h_orig = original.data();
+    unsigned char *hSrc = src.data();
+    unsigned char *hOut = out.data();
+    unsigned char *hOrig = original.data();
 
-    unsigned char *d_src;
-    unsigned char *d_out;
-    unsigned char *d_orig;
+    unsigned char *dSrc;
+    unsigned char *dOut;
+    unsigned char *dOrig;
     
 
-    hipMalloc((void**)&d_src, size);
-    hipMalloc((void**)&d_out, size);
-    hipMalloc((void**)&d_orig, size);
+    hipMalloc((void**)&dSrc, size);
+    hipMalloc((void**)&dOut, size);
+    hipMalloc((void**)&dOrig, size);
 
-    hipMemcpy(d_src, h_src, size, hipMemcpyHostToDevice);
-    hipMemcpy(d_out, h_out, size, hipMemcpyHostToDevice);
-    hipMemcpy(d_orig, h_orig, size, hipMemcpyHostToDevice);
+    hipMemcpy(dSrc, hSrc, size, hipMemcpyHostToDevice);
+    hipMemcpy(dOut, hOut, size, hipMemcpyHostToDevice);
+    hipMemcpy(dOrig, hOrig, size, hipMemcpyHostToDevice);
 
    //Create filter
    CMat Filter(3,3,0.f);
@@ -202,18 +201,16 @@ int main() {
    Filter.elements[7]= .125;
    Filter.elements[8]= .0625f;
 
-   //Blurr(d_src,width, height, Image,Filter,Output,d_out);
-   Blurr(d_src,width,height,Filter,d_out);
+   Blurr(dSrc,width,height,Filter,dOut);
 
-   //hipMemcpy(h_out, d_out, size, hipMemcpyDeviceToHost);
+   hipMemcpy(hOut, dOut, size, hipMemcpyDeviceToHost);
   
    //Save blurred image
    out.save("nonoise.bmp");
-   std::cout << "Output vs Source :";
-   L2Norm(d_out,width, height, d_src);
+
    std::cout << "Output vs original :";
-   L2Norm(d_out,width, height, d_orig);
+   L2Norm(dOut,width, height, dOrig);
    std::cout << "Source vs original :";
-   L2Norm(d_src,width,height, d_orig);
+   L2Norm(dSrc,width,height, dOrig);
 
 }
