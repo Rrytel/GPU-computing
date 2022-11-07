@@ -21,7 +21,7 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
 __global__ void L2Kernel(const unsigned char *blurImg, int widht, int height, const unsigned char *origImg, GMat L2);
 __global__ void reduce(GMat dOut, GMat dIn);
 
-
+ 
 __global__ void BlurrKernel(const unsigned char *in, int width, int height, const GMat Filter, unsigned char *out)
 {
    //Image width by height
