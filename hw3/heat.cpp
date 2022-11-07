@@ -56,9 +56,9 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
    }
     
    //Load rgb values into output[row][col]
-   out[row * width + col] = pixelValue.x;
-   out[(row + height) * width + col] = pixelValue.y;
-   out[(row + height*2) * width + col] = pixelValue.z;
+   out[row * width + col] = pixelValue.x > 255 ? 255 : pixelValue.x;
+   out[(row + height) * width + col] = pixelValue.y > 255 ? 255 : pixelValue.y;
+   out[(row + height*2) * width + col] = pixelValue.z > 255 ? 255 : pixelValue.z;
 }
 
 
