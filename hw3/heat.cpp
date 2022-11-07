@@ -82,7 +82,7 @@ __global__ void L2Kernel(const unsigned char *blurImg, int width, int height, co
     pixelValueO.y = (float)(origImg[(row + height) * width + col]);
     pixelValueO.z = (float)(origImg[(row + height*2) * width + col]);
 
-    float temp = ((abs(pixelValueB.x)+abs(pixelValueB.y)+abs(pixelValueB.z)) - (abs(pixelValueO.x)+abs(pixelValueO.y)+abs(pixelValueO.z)));
+    float temp = abs(pixelValueB.x - pixelValueO.x) + abs(pixelValueB.y - pixelValueO.y) + abs(pixelValueB.z - pixelValueO.z);
     temp *= temp;
 
     L2.elements[row*L2.width+col] = temp;
