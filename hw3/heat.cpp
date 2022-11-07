@@ -131,7 +131,7 @@ void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned 
            sum+= CL2.elements[i*CL2.width+j];
         }
    }
-   std::cout << "Serial Sum: " << sqrt(sum) <<std::endl;
+   //std::cout << "Serial Sum: " << sqrt(sum) <<std::endl;
    CMat Creduced(1024,1);
    GMat reduced(1024,1);
    dim3 dimBlockReduce(1024);
