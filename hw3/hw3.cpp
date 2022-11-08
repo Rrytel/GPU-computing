@@ -128,15 +128,7 @@ void L2Norm(const unsigned char *blurImg, int width, int height, const unsigned 
    dim3 dimGrid(width / dimBlock.x+1, height / dimBlock.y);
    L2Kernel<<<dimGrid, dimBlock>>>(blurImg,width,height,origImg,L2);
    CL2.load(L2);
-   float sum = 0;
-   for(int i =0; i < CL2.width; i++)
-   {
-	for(int j =0; j<CL2.height; j++)
-        {
-           sum+= CL2.elements[i*CL2.width+j];
-        }
-   }
-   std::cout << "Serial Sum: " << sqrt(sum) <<std::endl;
+   //Reduce
    CMat Creduced(1024,1);
    GMat reduced(1024,1);
    dim3 dimBlockReduce(1024);
