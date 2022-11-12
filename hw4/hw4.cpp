@@ -6,34 +6,46 @@
 #define NUM_BINS 1024
 
 
-__global__ void histogram_smem_atomics(const float *in, int width, int height, unsigned int *out)
+__global__ void histogram_smem_atomics(const float *in, int width, int height, float *out)
 {
     // pixel coordinates
+    int binSize = 2;
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     
     // linear thread index within 2D block
     int t = threadIdx.x + threadIdx.y * blockDim.x; 
+    //int t = threadIdx.x + blockDim.x*blockIdx.x;
     
     // initialize temporary accumulation array in shared memory
     __shared__ unsigned int smem[NUM_BINS];
-    smem[t] = 0;
+    __shared__ unsigned int numThreads;
+    if(t<NUM_BINS)
+    {
+       smem[t] = 0;
+    }
+    numThreads = 0;
     
     __syncthreads();
-    
+    atomicAdd(&numThreads,1);
     
     // process pixels
     // updates our block's partial histogram in shared memory
     unsigned int rgb;
-    rgb = (unsigned int)(in[y * width + x]); //Numbers between 0 and 1024
-
-    atomicAdd(&smem[rgb], 1);
+    //rgb = (unsigned int)(in[y * width + x]); //Numbers between 0 and 1024
+    rgb = (unsigned int)(in[t]);
+    atomicAdd(&smem[rgb/binSize], 1);
 
     __syncthreads();
     
     // write partial histogram into the global memory
     //  out += g * NUM_BINS;
-    atomicAdd(&out[t], smem[t]);
+    if(t<NUM_BINS)
+    {
+       //atomicAdd(&out[t], smem[t]);
+       atomicAdd(&out[t],1);
+    } 
+    //atomicAdd(&out[t], numThreads);
 }
 
 
@@ -44,7 +56,7 @@ __global__ void LoadArrayDataKernel(float *f1)
         
 }
 
-__global__ void ShmemReduceKernelSum(unsigned int * dOut, const unsigned int *dIn)
+__global__ void ShmemReduceKernelSum(float * dOut, float *dIn)
 {
     // sdata is allocated in the kernel call: via dynamic shared memeory
     extern __shared__ float sData[];
@@ -117,7 +129,9 @@ float MmmPi(int n)
     float maxValue;
     float histoSum;
     
+    
     float *dData;
+    
     float *dReduc; 
     unsigned int *dReducI; 
     size_t original = n*sizeof(float);
@@ -167,23 +181,44 @@ float MmmPi(int n)
 
 
     //Histo
-    unsigned int *hHisto = new unsigned int[NUM_BINS];
-    unsigned int *dHisto;
-    hipMalloc((void**)&dHisto, NUM_BINS*sizeof(unsigned int)); 
+    float *hHisto = new float[NUM_BINS];
+    float *dHisto;
+    hipMalloc((void**)&dHisto, NUM_BINS*sizeof(float)); 
+
+	//hipMemcpy(ptr, dData, sizeof(float)*n, hipMemcpyDeviceToHost);
+    	//for(int i =0; i<n; i++)
+    	//{
+		//std::cout << "data "<< i<<": " << ptr[i] << std::endl;
+    	//}
+
     
-    histogram_smem_atomics<<<gridDim, blockDim>>>(dData, 1024, 0, dHisto);
-    hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(unsigned int), hipMemcpyDeviceToHost);
+    histogram_smem_atomics<<<gridDim, blockDim>>>(dData, 2048, 0, dHisto);
+    hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
+    float temp = 0;
     for(int i = 0; i<1024; i++)
     {
-    	std::cout << hHisto[i] << std::endl;
+    	std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
+        temp += i;
+        if(true)
+        {
+                //std::cout << "bin "<< i<<": " << i/2<< std::endl;
+        }
+        else
+	{
+		//std::cout << "bin "<< i<<": " << i<< std::endl;
+	}
+        
     }
 
-    //Sum histo
+    //Sum histo // 524544
     
-    ShmemReduceKernelSum<<<gridDim,blockDim,sizeI>>>(dReducI,dHisto);
-    ShmemReduceKernelSum<<<1,blockDim,sizeI>>>(dReducI, dReducI);
-    hipMemcpy(&value, dReducI, sizeof(unsigned int), hipMemcpyDeviceToHost);
+    //ShmemReduceKernelSum<<<gridDim,blockDim,size>>>(dReduc,dData);
+    //ShmemReduceKernelSum<<<1,blockDim,size>>>(dReduc, dReduc);
+    //hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     std::cout << "Histo sum: " << value << std::endl; 
+    std::cout << "Max: " << maxValue << std::endl;
+    std::cout << "Min: " << minValue << std::endl;  
+     //std::cout << n/1024 << std::endl;
     
     //Free memory
     hipFree(dReduc);
@@ -196,7 +231,8 @@ float MmmPi(int n)
 int main()
 {
         int n = pow(2,4);
-        n = 1024;
+        //n = 1024;
+        n = 2048;
         float pi = MmmPi(n);
         std::cout<<" Pi = "<< pi <<std::endl;
         
