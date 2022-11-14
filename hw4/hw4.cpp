@@ -212,9 +212,9 @@ float MmmPi(int n)
 
     //Sum histo // 524544
     
-    //ShmemReduceKernelSum<<<gridDim,blockDim,size>>>(dReduc,dData);
+    ShmemReduceKernelSum<<<gridDim,blockDim,size>>>(dReduc,dHisto);
     //ShmemReduceKernelSum<<<1,blockDim,size>>>(dReduc, dReduc);
-    //hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
+    hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     std::cout << "Histo sum: " << value << std::endl; 
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
