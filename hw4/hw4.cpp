@@ -13,6 +13,8 @@ __global__ void normalize(float min, float *out)
 {
 	int tid = threadIdx.x + blockDim.x*blockIdx.x; 
 	out[tid] -= min;
+        //divide max-min
+        //(int) *1023
 }
 
 __global__ void histogram_smem_atomics(const float *in, float range, float min, float *out)
@@ -40,11 +42,17 @@ __global__ void histogram_smem_atomics(const float *in, float range, float min, 
      
     __syncthreads();
     //atomicAdd(&numThreads,1);
+    
+    float value = in[t];
+    value = (int)((value-min)/(range))*1023;
+    //value /= binSize;
+    int bin = value;
     int temp;
     temp = (in[t]);
     int buffer = temp % NUM_BINS;
-    atomicAdd(&smem[int(temp/binSize)], 1);
-    //atomicAdd(&smem[int(buffer)],1);
+    //atomicAdd(&smem[int(temp/binSize)], 1);
+    //atomicAdd(&out[bin], 1);
+    atomicAdd(&smem[bin],1);
     //atomicAdd(&out[temp/binSize],1);
 
     __syncthreads();
@@ -223,7 +231,7 @@ float MmmPi(int n)
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     minValue = value;   
 
-    normalize<<<gridDim,blockDim>>>(minValue,dData);
+    //normalize<<<gridDim,blockDim>>>(minValue,dData);
     
 
     //Histo
@@ -259,6 +267,7 @@ float MmmPi(int n)
     std::cout << "Serial sum: " << serialSum << std::endl;
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
+std::cout << "Math: " << (int)(1.880974126480706/((maxValue-minValue)/NUM_BINS)) << std::endl; 
     
     //Free memory
     hipFree(dReduc);
