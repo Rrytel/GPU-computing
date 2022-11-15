@@ -19,80 +19,31 @@ __global__ void normalize(float min, float *out)
 
 __global__ void histogram_smem_atomics(const float *in, float range, float min, float *out)
 {
-    float binSize = range/NUM_BINS;
     
-    //__shared__ unsigned int numThreads;
-    // initialize temporary accumulation array in shared memory
     extern __shared__ unsigned int smem[];
-    //numThreads = 0;
     
     // linear thread index within linear block
     int t = threadIdx.x + blockIdx.x * blockDim.x;
     int tid = threadIdx.x;
 
+    out[t] = 0;
+    __syncthreads();
+
     if(tid< NUM_BINS)
     {
-	smem[tid] = 0;
+	    smem[tid] = 0;
     }
-    
-    if(t<NUM_BINS)
-    {
-       //smem[t] = 0;
-    }
-     
     __syncthreads();
-    //atomicAdd(&numThreads,1);
-    
-    float value = in[t];
-    value = (int)((value-min)/(range))*1023;
-    //value /= binSize;
-    int bin = value;
-    int temp;
-    temp = (in[t]);
-    int buffer = temp % NUM_BINS;
-    //atomicAdd(&smem[int(temp/binSize)], 1);
-    //atomicAdd(&out[bin], 1);
-    atomicAdd(&smem[bin],1);
-    //atomicAdd(&out[temp/binSize],1);
+    int bin = static_cast<int>(((in[t]-min)/(range))*1023);
+    if(blockIdx.x == 0) out[tid] = bin;
+/*    atomicAdd(&smem[bin],1);
 
     __syncthreads();
     
-    // write partial histogram into the global memory
-    //  out += g * NUM_BINS;
-    if(t<NUM_BINS)
-    {
-       //atomicAdd(&(out[t]), smem[t]);
-       //atomicAdd(&out[t],1);
-       
-    } 
     if(tid<NUM_BINS)
     {
-	atomicAdd(&(out[tid]), smem[tid]);
-    }
-    
-//////////////////////////////////////////////////////
-   /* //Create Private copies of histo[] array; 
-    extern __shared__ unsigned int histoLDS[];
-    int binCount = NUM_BINS;
-
-    int tid = threadIdx.x;
-    if(tid < binCount)
-       histoLDS[tid] = 0;
-    __syncthreads(); 
-
-    int gid = threadIdx.x + blockDim.x*blockIdx.x;
-    int temp = in[gid];
-    int buffer = int(temp % binCount); 
-    atomicAdd(&(histoLDS[buffer]), 1);
-    __syncthreads();
-
-    //Build Final Histogram using private histograms.
-
-    if(tid < binCount)
-    {
-       atomicAdd(&(out[tid]), histoLDS[tid]);
-    }
-*/
+        atomicAdd(&(out[tid]), smem[tid]);
+    } */
 }
 
 
@@ -188,6 +139,15 @@ float MmmPi(int n)
     }
     n= numElements;
 
+
+    float minTemp = numbers[0];
+    float maxTemp = numbers[0];
+    for(int i = 0; i < numElements; i++)
+    {
+        minTemp = (minTemp <= numbers[i]) ? minTemp : numbers[i];
+        maxTemp = (maxTemp >= numbers[i]) ? maxTemp : numbers[i];
+    }
+    std::cout<<"Min " << minTemp << '\t' << "Max " << maxTemp << std::endl;
     float value;
     float minValue;
     float maxValue;
@@ -221,13 +181,13 @@ float MmmPi(int n)
 
     //Get Max
     ShmemReduceKernelMaxMin<<<gridDim,blockDim,size>>>(dReduc,dData,true);
-    ShmemReduceKernelMaxMin<<<1,blockDim,size>>>(dReduc, dReduc,true);    
+    ShmemReduceKernelMaxMin<<<1,gridDim,size>>>(dReduc, dReduc,true);    
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost); 
     maxValue = value;
 
     //Get Min
     ShmemReduceKernelMaxMin<<<gridDim,blockDim,size>>>(dReduc,dData,false);
-    ShmemReduceKernelMaxMin<<<1,blockDim,size>>>(dReduc, dReduc,false);
+    ShmemReduceKernelMaxMin<<<1,gridDim,size>>>(dReduc, dReduc,false);
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     minValue = value;   
 
@@ -246,9 +206,11 @@ float MmmPi(int n)
     	//}
 
     dim3 blockDimHisto(1024);
-    dim3 gridDimHisto(n/blockDim.x);    
+    dim3 gridDimHisto((n + blockDim.x -1)/blockDim.x);    
 
-    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxValue-minValue), minValue, dHisto);
+//    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxValue-minValue), minValue, dHisto);
+    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxTemp-minTemp), minTemp, dHisto);
+
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     float temp = 0;
     float serialSum = 0;
@@ -267,7 +229,7 @@ float MmmPi(int n)
     std::cout << "Serial sum: " << serialSum << std::endl;
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
-std::cout << "Math: " << (int)(1.880974126480706/((maxValue-minValue)/NUM_BINS)) << std::endl; 
+    std::cout << "Math: " << (int)(1.880974126480706/((maxValue-minValue)/NUM_BINS)) << std::endl; 
     
     //Free memory
     hipFree(dReduc);
