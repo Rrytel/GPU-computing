@@ -9,11 +9,16 @@
 
 #define NUM_BINS 1024
 
-
-__global__ void histogram_smem_atomics(const float *in, int width, int height, float *out)
+__global__ void normalize(float min, float *out)
 {
-    int binSize = width/NUM_BINS;
-    /*
+	int tid = threadIdx.x + blockDim.x*blockIdx.x; 
+	out[tid] -= min;
+}
+
+__global__ void histogram_smem_atomics(const float *in, float range, float min, float *out)
+{
+    float binSize = range/NUM_BINS;
+    
     //__shared__ unsigned int numThreads;
     // initialize temporary accumulation array in shared memory
     extern __shared__ unsigned int smem[];
@@ -35,10 +40,11 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
      
     __syncthreads();
     //atomicAdd(&numThreads,1);
-    unsigned int temp;
-    temp = (unsigned int)(in[t]);
-    int buffer = t % NUM_BINS;
-    atomicAdd(&smem[temp/binSize], 1);
+    int temp;
+    temp = (in[t]);
+    int buffer = temp % NUM_BINS;
+    atomicAdd(&smem[int(temp/binSize)], 1);
+    //atomicAdd(&smem[int(buffer)],1);
     //atomicAdd(&out[temp/binSize],1);
 
     __syncthreads();
@@ -55,9 +61,9 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
     {
 	atomicAdd(&(out[tid]), smem[tid]);
     }
-    */	
+    
 //////////////////////////////////////////////////////
-    //Create Private copies of histo[] array; 
+   /* //Create Private copies of histo[] array; 
     extern __shared__ unsigned int histoLDS[];
     int binCount = NUM_BINS;
 
@@ -67,7 +73,8 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
     __syncthreads(); 
 
     int gid = threadIdx.x + blockDim.x*blockIdx.x;
-    int buffer = gid % binCount; 
+    int temp = in[gid];
+    int buffer = int(temp % binCount); 
     atomicAdd(&(histoLDS[buffer]), 1);
     __syncthreads();
 
@@ -77,7 +84,7 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
     {
        atomicAdd(&(out[tid]), histoLDS[tid]);
     }
-
+*/
 }
 
 
@@ -216,6 +223,8 @@ float MmmPi(int n)
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     minValue = value;   
 
+    normalize<<<gridDim,blockDim>>>(minValue,dData);
+    
 
     //Histo
     float *hHisto = new float[NUM_BINS];
@@ -231,12 +240,14 @@ float MmmPi(int n)
     dim3 blockDimHisto(1024);
     dim3 gridDimHisto(n/blockDim.x);    
 
-    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, n, 0, dHisto);
+    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxValue-minValue), minValue, dHisto);
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     float temp = 0;
+    float serialSum = 0;
     for(int i = 0; i<1024; i++)
     {
     	std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
+        serialSum += hHisto[i];
         temp += i;
     }
 
@@ -245,6 +256,7 @@ float MmmPi(int n)
     //ShmemReduceKernelSum<<<1,blockDim,size>>>(dReduc, dReduc);
     hipMemcpy(&histoSum, dReduc, sizeof(float), hipMemcpyDeviceToHost);
     std::cout << "Histo sum: " << histoSum << std::endl; 
+    std::cout << "Serial sum: " << serialSum << std::endl;
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
     
