@@ -35,15 +35,14 @@ __global__ void histogram_smem_atomics(const float *in, float range, float min, 
     }
     __syncthreads();
     int bin = static_cast<int>(((in[t]-min)/(range))*1023);
-    if(blockIdx.x == 0) out[tid] = bin;
-/*    atomicAdd(&smem[bin],1);
+    atomicAdd(&smem[bin],1);
 
     __syncthreads();
     
     if(tid<NUM_BINS)
     {
         atomicAdd(&(out[tid]), smem[tid]);
-    } */
+    } 
 }
 
 
@@ -175,7 +174,7 @@ float MmmPi(int n)
 
     std::cout<< "Number of array elements: " << numElements << std::endl;
     //Load array data to gpu
-    hipMemcpy(dData, numbers.data(), size, hipMemcpyHostToDevice);
+    hipMemcpy(dData, numbers.data(), original, hipMemcpyHostToDevice);
 
     //LoadArrayDataKernel<<<gridDim, blockDim>>>(dData);
 
@@ -206,10 +205,10 @@ float MmmPi(int n)
     	//}
 
     dim3 blockDimHisto(1024);
-    dim3 gridDimHisto((n + blockDim.x -1)/blockDim.x);    
+    dim3 gridDimHisto(n/blockDim.x);    
 
-//    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxValue-minValue), minValue, dHisto);
-    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxTemp-minTemp), minTemp, dHisto);
+    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxValue-minValue), minValue, dHisto);
+//    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, (maxTemp-minTemp), minTemp, dHisto);
 
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     float temp = 0;
