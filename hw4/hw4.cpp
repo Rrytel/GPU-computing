@@ -9,32 +9,48 @@
 __global__ void histogram_smem_atomics(const float *in, int width, int height, float *out)
 {
     // pixel coordinates
-    int binSize = 2;
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int binSize = width/NUM_BINS;
     
-    // linear thread index within 2D block
-    int t = threadIdx.x + threadIdx.y * blockDim.x; 
-    //int t = threadIdx.x + blockDim.x*blockIdx.x;
-    
+    __shared__ unsigned int numThreads;
     // initialize temporary accumulation array in shared memory
     __shared__ unsigned int smem[NUM_BINS];
-    __shared__ unsigned int numThreads;
+    numThreads = 0;
+    //int x = blockIdx.x * blockDim.x + threadIdx.x;
+    //int y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    // linear thread index within 2D block
+    int t = threadIdx.x + threadIdx.y * blockDim.x;
+    int blockId = blockIdx.y * gridDim.x + blockIdx.x;
+    int threadId = blockId * blockDim.x + threadIdx.x;
+    t = threadIdx.x + blockIdx.x * blockDim.x;
+
+    if(blockIdx.x ==2)
+    {
+       //atomicAdd(&out[1023],1);
+    }
+   
+   
+    
+    
     if(t<NUM_BINS)
     {
        smem[t] = 0;
     }
-    numThreads = 0;
+     
+    
+    
+    
+    
     
     __syncthreads();
+
     atomicAdd(&numThreads,1);
+    //atomicAdd(&out[t],1);
     
-    // process pixels
-    // updates our block's partial histogram in shared memory
-    unsigned int rgb;
-    //rgb = (unsigned int)(in[y * width + x]); //Numbers between 0 and 1024
-    rgb = (unsigned int)(in[t]);
-    atomicAdd(&smem[rgb/binSize], 1);
+    unsigned int temp;
+    temp = (unsigned int)(in[t]);
+    //atomicAdd(&smem[temp/binSize], 1);
+    atomicAdd(&out[temp/binSize],1);
 
     __syncthreads();
     
@@ -43,8 +59,11 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
     if(t<NUM_BINS)
     {
        //atomicAdd(&out[t], smem[t]);
-       atomicAdd(&out[t],1);
+       //atomicAdd(&out[t],1);
+       
     } 
+       //atomicAdd(&out[t],1);
+     //atomicAdd(&out[t],t);
     //atomicAdd(&out[t], numThreads);
 }
 
@@ -162,7 +181,7 @@ float MmmPi(int n)
 	//Max = max(ptr[i],Max);
     //}
     //hipMemcpy(dData, ptr, sizeof(float)*n,hipMemcpyHostToDevice);
-    LoadArrayDataKernel<<<gridDim, blockDim,size>>>(dData);
+    LoadArrayDataKernel<<<gridDim, blockDim>>>(dData);
 
 
     //hipMemcpy(dData, ptr, sizeof(float)*n,hipMemcpyHostToDevice);
@@ -191,8 +210,10 @@ float MmmPi(int n)
 		//std::cout << "data "<< i<<": " << ptr[i] << std::endl;
     	//}
 
-    
-    histogram_smem_atomics<<<gridDim, blockDim>>>(dData, 2048, 0, dHisto);
+    dim3 blockDimHisto(1024);
+    dim3 gridDimHisto(2);    
+
+    histogram_smem_atomics<<<gridDimHisto, blockDimHisto>>>(dData, 2048, 0, dHisto);
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     float temp = 0;
     for(int i = 0; i<1024; i++)
@@ -218,6 +239,7 @@ float MmmPi(int n)
     std::cout << "Histo sum: " << value << std::endl; 
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
+    std::cout << "Math " << 1023/2 << std::endl;
      //std::cout << n/1024 << std::endl;
     
     //Free memory
