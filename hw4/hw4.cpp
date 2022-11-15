@@ -3,54 +3,43 @@
 #include <iostream>
 #include <cmath>
 #include <hip/hip_runtime.h>
+#include <vector>
+#include <iterator>
+#include <fstream>
+
 #define NUM_BINS 1024
 
 
 __global__ void histogram_smem_atomics(const float *in, int width, int height, float *out)
 {
-    // pixel coordinates
     int binSize = width/NUM_BINS;
-    
-    __shared__ unsigned int numThreads;
+    /*
+    //__shared__ unsigned int numThreads;
     // initialize temporary accumulation array in shared memory
-    __shared__ unsigned int smem[NUM_BINS];
-    numThreads = 0;
-    //int x = blockIdx.x * blockDim.x + threadIdx.x;
-    //int y = blockIdx.y * blockDim.y + threadIdx.y;
+    extern __shared__ unsigned int smem[];
+    //numThreads = 0;
     
-    // linear thread index within 2D block
-    int t = threadIdx.x + threadIdx.y * blockDim.x;
-    int blockId = blockIdx.y * gridDim.x + blockIdx.x;
-    int threadId = blockId * blockDim.x + threadIdx.x;
-    t = threadIdx.x + blockIdx.x * blockDim.x;
+    // linear thread index within linear block
+    int t = threadIdx.x + blockIdx.x * blockDim.x;
+    int tid = threadIdx.x;
 
-    if(blockIdx.x ==2)
+    if(tid< NUM_BINS)
     {
-       //atomicAdd(&out[1023],1);
+	smem[tid] = 0;
     }
-   
-   
-    
     
     if(t<NUM_BINS)
     {
-       smem[t] = 0;
+       //smem[t] = 0;
     }
      
-    
-    
-    
-    
-    
     __syncthreads();
-
-    atomicAdd(&numThreads,1);
-    //atomicAdd(&out[t],1);
-    
+    //atomicAdd(&numThreads,1);
     unsigned int temp;
     temp = (unsigned int)(in[t]);
-    //atomicAdd(&smem[temp/binSize], 1);
-    atomicAdd(&out[temp/binSize],1);
+    int buffer = t % NUM_BINS;
+    atomicAdd(&smem[temp/binSize], 1);
+    //atomicAdd(&out[temp/binSize],1);
 
     __syncthreads();
     
@@ -58,13 +47,37 @@ __global__ void histogram_smem_atomics(const float *in, int width, int height, f
     //  out += g * NUM_BINS;
     if(t<NUM_BINS)
     {
-       //atomicAdd(&out[t], smem[t]);
+       //atomicAdd(&(out[t]), smem[t]);
        //atomicAdd(&out[t],1);
        
     } 
-       //atomicAdd(&out[t],1);
-     //atomicAdd(&out[t],t);
-    //atomicAdd(&out[t], numThreads);
+    if(tid<NUM_BINS)
+    {
+	atomicAdd(&(out[tid]), smem[tid]);
+    }
+    */	
+//////////////////////////////////////////////////////
+    //Create Private copies of histo[] array; 
+    extern __shared__ unsigned int histoLDS[];
+    int binCount = NUM_BINS;
+
+    int tid = threadIdx.x;
+    if(tid < binCount)
+       histoLDS[tid] = 0;
+    __syncthreads(); 
+
+    int gid = threadIdx.x + blockDim.x*blockIdx.x;
+    int buffer = gid % binCount; 
+    atomicAdd(&(histoLDS[buffer]), 1);
+    __syncthreads();
+
+    //Build Final Histogram using private histograms.
+
+    if(tid < binCount)
+    {
+       atomicAdd(&(out[tid]), histoLDS[tid]);
+    }
+
 }
 
 
@@ -143,16 +156,31 @@ __global__ void ShmemReduceKernelMaxMin(float * dOut, const float *dIn, const bo
 float MmmPi(int n)
 {
     //Initialization
+
+    int numElements = 0;
+    std::ifstream inputStream("data.txt");
+    std::vector<float> numbers;
+    std::string line;
+    float element;
+    if (inputStream)
+    {
+	while(std::getline(inputStream,line))
+        {
+        	numbers.push_back(std::stof(line));
+		numElements++;
+        }
+	
+    }
+    n= numElements;
+
     float value;
     float minValue;
     float maxValue;
     float histoSum;
     
-    
     float *dData;
-    
     float *dReduc; 
-    unsigned int *dReducI; 
+     
     size_t original = n*sizeof(float);
     size_t reduc = n/(1024)*sizeof(float);
     size_t reducI = n/(1024)*sizeof(unsigned int);
@@ -160,7 +188,6 @@ float MmmPi(int n)
     //Allocation    
     hipMalloc(&dData, original);
     hipMalloc(&dReduc, reduc);
-    hipMalloc(&dReducI, reducI);
     
     float* ptr = (float*) malloc(sizeof(float)*n);
     
@@ -171,28 +198,19 @@ float MmmPi(int n)
     size_t size = blockDim.x*sizeof(float);
     size_t sizeI = blockDim.x*sizeof(unsigned int);
 
-    //for(int j = 0; j < n; j++)
-    //{
-	//ptr[j] = j;
-    //}
-    //float Max = 0;
-    //for(int i = 0; i < n; i++)
-    //{ 
-	//Max = max(ptr[i],Max);
-    //}
-    //hipMemcpy(dData, ptr, sizeof(float)*n,hipMemcpyHostToDevice);
-    LoadArrayDataKernel<<<gridDim, blockDim>>>(dData);
+    std::cout<< "Number of array elements: " << numElements << std::endl;
+    //Load array data to gpu
+    hipMemcpy(dData, numbers.data(), size, hipMemcpyHostToDevice);
 
+    //LoadArrayDataKernel<<<gridDim, blockDim>>>(dData);
 
-    //hipMemcpy(dData, ptr, sizeof(float)*n,hipMemcpyHostToDevice);
-    //std::cout << "serial max: " << Max << std::endl;
+    //Get Max
     ShmemReduceKernelMaxMin<<<gridDim,blockDim,size>>>(dReduc,dData,true);
     ShmemReduceKernelMaxMin<<<1,blockDim,size>>>(dReduc, dReduc,true);    
-
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost); 
     maxValue = value;
 
-    //LoadArrayDataKernel<<<gridDim, blockDim,size>>>(dData);
+    //Get Min
     ShmemReduceKernelMaxMin<<<gridDim,blockDim,size>>>(dReduc,dData,false);
     ShmemReduceKernelMaxMin<<<1,blockDim,size>>>(dReduc, dReduc,false);
     hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
@@ -211,41 +229,29 @@ float MmmPi(int n)
     	//}
 
     dim3 blockDimHisto(1024);
-    dim3 gridDimHisto(2);    
+    dim3 gridDimHisto(n/blockDim.x);    
 
-    histogram_smem_atomics<<<gridDimHisto, blockDimHisto>>>(dData, 2048, 0, dHisto);
+    histogram_smem_atomics<<<gridDimHisto, blockDimHisto,size>>>(dData, n, 0, dHisto);
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     float temp = 0;
     for(int i = 0; i<1024; i++)
     {
     	std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
         temp += i;
-        if(true)
-        {
-                //std::cout << "bin "<< i<<": " << i/2<< std::endl;
-        }
-        else
-	{
-		//std::cout << "bin "<< i<<": " << i<< std::endl;
-	}
-        
     }
 
-    //Sum histo // 524544
     
     ShmemReduceKernelSum<<<gridDim,blockDim,size>>>(dReduc,dHisto);
     //ShmemReduceKernelSum<<<1,blockDim,size>>>(dReduc, dReduc);
-    hipMemcpy(&value, dReduc, sizeof(float), hipMemcpyDeviceToHost);
-    std::cout << "Histo sum: " << value << std::endl; 
+    hipMemcpy(&histoSum, dReduc, sizeof(float), hipMemcpyDeviceToHost);
+    std::cout << "Histo sum: " << histoSum << std::endl; 
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
-    std::cout << "Math " << 1023/2 << std::endl;
-     //std::cout << n/1024 << std::endl;
     
     //Free memory
     hipFree(dReduc);
     hipFree(dData);
-    hipFree(dReducI);
+
     return value;
 }
 
@@ -253,13 +259,8 @@ float MmmPi(int n)
 int main()
 {
         int n = pow(2,4);
-        //n = 1024;
         n = 2048;
         float pi = MmmPi(n);
-        std::cout<<" Pi = "<< pi <<std::endl;
         
-        //unsigned int *hHisto = new unsigned int[NUM_BINS];
-        //unsigned int *dHisto;
-        //hipMalloc((void**)&dHisto, NUM_BINS*sizeof(unsigned int));
 }
 
