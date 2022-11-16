@@ -9,6 +9,57 @@
 
 #define NUM_BINS 1024
 
+__global__ void BlScan(float *oData, const float *iData, int n) 
+{
+  extern __shared__ float temp[]; // allocated on invocation
+  int tId = threadIdx.x;
+  int offset = 1;
+  temp[2 * tId] = iData[2 * tId]; // load input into shared memory
+  temp[2 * tId + 1] = iData[2 * tId + 1];
+  for (int d = n >> 1; d > 0; d >>= 1) // build sum in place up the tree
+  {
+    __syncthreads();
+    if (tId < d) {
+      int aI = offset * (2 * tId + 1) - 1;
+      int bI = offset * (2 * tId + 2) - 1;
+      temp[bI] += temp[aI];
+    }
+    offset *= 2;
+  }
+  if (tId == 0) {
+    temp[n - 1] = 0;
+  }                              // clear the last element
+  for (int d = 1; d < n; d *= 2) // traverse down tree & build scan
+  {
+    offset >>= 1;
+    __syncthreads();
+    if (tId < d) {
+      int aI = offset * (2 * tId + 1) - 1;
+      int bI = offset * (2 * tId + 2) - 1;
+      float t = temp[aI];
+      temp[aI] = temp[bI];
+      temp[bI] += t;
+    }
+  }
+  __syncthreads();
+  oData[2 * tId] = temp[2 * tId]; // write results to device memory
+  oData[2 * tId + 1] = temp[2 * tId + 1];
+}
+
+__global__ void Ex2In(float *scan, float *iData, int n) {
+  extern __shared__ float temp[]; // allocated via kernel config
+  int tId = threadIdx.x;
+  if (tId >= n)
+    return;
+  temp[tId] = scan[tId]; // load scan data;
+  __syncthreads();
+
+  if (tId > 0)
+    scan[tId - 1] = temp[tId];
+
+  if (tId == n - 1)
+    scan[tId] = temp[tId] + iData[tId]; // last element clean up!
+}
 __global__ void PDF(float histoSum, float *out)
 {
 	int tid = threadIdx.x + blockDim.x*blockIdx.x; 
@@ -204,7 +255,20 @@ void Histo()
     for(int i = 0; i<1024; i++)
     {
     	//std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
-        serialSum += hHisto[i];
+        temp += i;
+    }
+    
+    //Sum scan PDF for CDF
+    float *dCDF;
+    float *hCDF = new float[NUM_BINS];
+    hipMalloc(&dCDF, NUM_BINS*sizeof(float));
+    BlScan<<<1,NUM_BINS/2.2*NUM_BINS*sizeof(float)>>>(dCDF,dHisto,NUM_BINS);
+    Ex2In<<<1, NUM_BINS, NUM_BINS*sizeof(float)>>>(dCDF, dHisto, NUM_BINS);
+    hipMemcpy(hCDF, dCDF, sizeof(float)*NUM_BINS, hipMemcpyDeviceToHost);    
+    temp = 0;
+    for(int i = 0; i<1024; i++)
+    {
+    	std::cout << "bin "<< i<<": " << hCDF[i] << std::endl;
         temp += i;
     }
 
