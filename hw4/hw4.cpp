@@ -10,6 +10,12 @@
 
 #define NUM_BINS 1024
 
+__device__ float Normal(float x, float mu, float sig) {
+  float temp1 = 1.0f / (std::sqrt(2.0f * 3.14) * sig);
+  float temp2 = 0.5f * (x - mu) * (x - mu) / (sig * sig);
+  float val = temp1 * std::exp(-temp2);
+  return val;
+}
 
 __global__ void DataGen(float *data, float *x, float xBeg, float deltaX,
                         float mu, float sig, int n) {
@@ -22,7 +28,7 @@ __global__ void DataGen(float *data, float *x, float xBeg, float deltaX,
   float xTemp[2];
   xTemp[0] = xBeg + tId * deltaX;
   xTemp[1] = xBeg + (tId - 1) * deltaX;
-  //data[tId - 1] =(Normal(xTemp[0], mu, sig) + Normal(xTemp[1], mu, sig)) * deltaX * 0.5f;
+  data[tId - 1] =(Normal(xTemp[0], mu, sig) + Normal(xTemp[1], mu, sig)) * deltaX * 0.5f;
   x[tId - 1] = xTemp[0];
 }
 
@@ -78,10 +84,10 @@ __global__ void Ex2In(float *scan, float *iData, int n) {
   if (tId == n - 1)
     scan[tId] = temp[tId] + iData[tId]; // last element clean up!
 }
-__global__ void PDF(float histoSum, float *out)
+__global__ void PDF(float histoSum,float *histo, float *outPDF)
 {
 	int tid = threadIdx.x + blockDim.x*blockIdx.x; 
-	out[tid] /= histoSum;
+	outPDF[tid] = histo[tid]/histoSum;
 }
 
 __global__ void histogram_smem_atomics(const float *in, float range, float min, float *out)
@@ -223,7 +229,7 @@ void Histo()
     size_t size = blockDim.x*sizeof(float);
     size_t sizeI = blockDim.x*sizeof(unsigned int);
 
-    std::cout<< "Number of array elements: " << numElements << std::endl;
+    //std::cout<< "Number of array elements: " << numElements << std::endl;
     //Load array data to gpu
     hipMemcpy(dData, numbers.data(), original, hipMemcpyHostToDevice);
 
@@ -256,27 +262,28 @@ void Histo()
     hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     
     float temp = 0;
-    float serialSum = 0;
-    for(int i = 0; i<1024; i++)
-    {
-    	std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
-        serialSum += hHisto[i];
-        temp += i;
-    }
+    //for(int i = 0; i<1024; i++)
+    //{
+    	//std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
+        //temp += i;
+    //}
 
     
     ShmemReduceKernelSum<<<gridDim,blockDim,size>>>(dReduc,dHisto);
     hipMemcpy(&histoSum, dReduc, sizeof(float), hipMemcpyDeviceToHost);
 
     //PDF
-    PDF<<<gridDim,blockDim>>>(histoSum,dHisto);
-    hipMemcpy(hHisto, dHisto, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
+    float *dPDF;
+    float *hPDF = new float[NUM_BINS];
+    hipMalloc(&dPDF, NUM_BINS*sizeof(float));
+    PDF<<<gridDim,blockDim>>>(histoSum, dHisto ,dPDF);
+    hipMemcpy(hPDF, dPDF, NUM_BINS*sizeof(float), hipMemcpyDeviceToHost);
     temp = 0;
-    for(int i = 0; i<1024; i++)
-    {
-    	std::cout << "bin "<< i<<": " << hHisto[i] << std::endl;
-        temp += i;
-    }
+    //for(int i = 0; i<1024; i++)
+    //{
+    	//std::cout << "bin "<< i<<": " << hPDF[i] << std::endl;
+        //temp += i;
+    //}
     
     //Sum scan PDF for CDF
     float *dCDF;
@@ -287,19 +294,19 @@ void Histo()
     float *dX;
     hipMalloc(&dCDF, NUM_BINS*sizeof(float));
     hipMalloc(&dX, NUM_BINS*sizeof(float));
-    DataGen<<<2, NUM_BINS / 2 + 1>>>(dHisto, dX, xBeg, deltaX, 0.0, 1.0, NUM_BINS);
-    BlScan<<<1,NUM_BINS/2.2*NUM_BINS*sizeof(float)>>>(dCDF,dHisto,NUM_BINS);
-    Ex2In<<<1, NUM_BINS, NUM_BINS*sizeof(float)>>>(dCDF, dHisto, NUM_BINS);
+    DataGen<<<2, NUM_BINS / 2 + 1>>>(dPDF, dX, xBeg, deltaX, 0.0, 1.0, NUM_BINS);
+    BlScan<<<1,NUM_BINS/2,2*NUM_BINS*sizeof(float)>>>(dCDF,dPDF,NUM_BINS);
+    Ex2In<<<1, NUM_BINS, NUM_BINS*sizeof(float)>>>(dCDF, dPDF, NUM_BINS);
+    hipMemcpy(x.data(), dX, sizeof(float)*NUM_BINS, hipMemcpyDeviceToHost);
     hipMemcpy(hCDF, dCDF, sizeof(float)*NUM_BINS, hipMemcpyDeviceToHost);    
     temp = 0;
-    for(int i = 0; i<1024; i++)
-    {
+    //for(int i = 0; i<1024; i++)
+   // {
     	//std::cout << "bin "<< i<<": " << hCDF[i] << std::endl;
-        temp += i;
-    }
+        //temp += i;
+   // }
 
     std::cout << "Histo sum: " << histoSum << std::endl; 
-    std::cout << "Serial sum: " << serialSum << std::endl;
     std::cout << "Max: " << maxValue << std::endl;
     std::cout << "Min: " << minValue << std::endl;  
 
@@ -307,7 +314,7 @@ void Histo()
     std::ofstream myFile;
     myFile.open("cdf.dat");
     for (int aa = 0; aa < NUM_BINS; aa++) {
-      myFile << x[aa] << '\t' << hHisto[aa] << '\t' << hCDF[aa] << "\n";
+      myFile << x[aa] << '\t' << hPDF[aa] << '\t' << hCDF[aa] << "\n";
     }
     myFile << std::endl;
 
