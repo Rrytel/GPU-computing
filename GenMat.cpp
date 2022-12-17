@@ -7,6 +7,7 @@
 #include <iostream>
 #include <omp.h>
 #include <stdio.h>
+#include <numeric>
 
 /* Use Matrix Class! */
 #include "mat.h"
@@ -31,6 +32,14 @@ __global__ void NaiveKernel(const GMat A, const GMat B, GMat C);
    :inputs: Matrix A, Matrix B
    :outputs: Matrix C = AB
  */
+
+int gcd(int a, int b) 
+{
+   if (b == 0)
+   return a;
+   return gcd(b, a % b);
+}
+
 void MatMul(const CMat A, const CMat B, CMat C) {
   int Gpu = 1;
   // Load A and B to device memory
@@ -69,6 +78,14 @@ void MatMul(const CMat A, const CMat B, CMat C) {
 
 // Matrix Multiplication Kernel
 __global__ void MatMulKernel(GMat A, GMat B, GMat C) {
+
+
+  int tcol = blockIdx.x * blockDim.x + threadIdx.x;
+  int trow = blockIdx.y * blockDim.y + threadIdx.y;
+  if (!(trow < A.height && tcol < B.width))
+  {
+	return;
+  }
   // Static shared memory for Asub and Bsub
   __shared__ float aS[BLOCK_SIZE][BLOCK_SIZE];
   __shared__ float bS[BLOCK_SIZE][BLOCK_SIZE]; // Great name for an array
@@ -131,14 +148,15 @@ __global__ void NaiveKernel(const GMat A, const GMat B, GMat C) {
 }
 
 
-__global__ void FillMatRand(GMat A)
+__global__ void MatByFloat(GMat A, float b, GMat C)
 {
    int row = blockIdx.y * blockDim.y + threadIdx.y;
    int col = blockIdx.x * blockDim.x + threadIdx.x;
-   //A.elements[row * A.width +col] = rand() % 100;
+   C.elements[row * C.width + col] = A.elements[row * A.width +col] * b;
+
 }
 
-__global__ void MatByFloat(GMat A, float b, GMat C)
+__global__ void MatByDouble(GMat A, double b, GMat C)
 {
    int row = blockIdx.y * blockDim.y + threadIdx.y;
    int col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -154,14 +172,34 @@ __global__ void MatAdd(GMat A, GMat B, GMat C)
 
 }
 
+__global__ void Transpose(GMat A, GMat C)
+{
+   int row = blockIdx.y * blockDim.y + threadIdx.y;
+   int col = blockIdx.x * blockDim.x + threadIdx.x;
+   C.elements[row * C.width + col] =  A.elements[col * A.width + row];
+}
+
+__global__ void GpuCopy(GMat A, GMat C)
+{
+   int row = blockIdx.y * blockDim.y + threadIdx.y;
+   int col = blockIdx.x * blockDim.x + threadIdx.x;
+   C.elements[row * C.width + col] =  A.elements[row * A.width + col];
+}
+
 void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const CMat B, const int beta, const CMat C, CMat D)
 {
+
+
   // Load A, B, and C to device memory
   // Allocate Matrix D
   GMat dA(A.width, A.height);
   GMat dB(B.width, B.height);
   GMat dC(C.width, C.height);
   GMat dD(D.width, D.height);
+
+
+  //CMat aT(A.height,A.width);
+  //GMat dAt(A.height,A.width);
 
   CMat addResult(C.width, C.height);
   GMat dAddResult(C.width, C.height);
@@ -177,19 +215,140 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   dB.load(B);
   dC.load(C);
 
-  
+
+  int aTransHeight;
+  int aTransWidth;
+  if(opA)
+  {
+     aTransHeight = A.width;
+     aTransWidth = A.height;
+  }
+  else
+  {
+     aTransHeight = A.height;
+     aTransWidth = A.width;
+  }
+
+  int bTransHeight;
+  int bTransWidth;
+  if(opB)
+  {
+     bTransHeight = B.width;
+     bTransWidth = B.height;
+  }
+  else
+  {
+     bTransHeight = B.height;
+     bTransWidth = B.width;
+  }
+
+  CMat aT(aTransWidth,aTransHeight);
+  GMat dAt(aTransWidth,aTransHeight);
+
+  CMat bT(bTransWidth,bTransHeight);
+  GMat dBt(bTransWidth,bTransHeight);
+
  
   // D = alpha * opA (A) * opB (B) + beta(C)
+
+  // A transpose
+  if(opA)
+  {
+      for (int i = 0; i < A.height; i++) 
+      {
+       for (int j = 0; j < A.width; j++) {
+        std::cout << A.elements[i * A.width + j];
+        std::cout << " ";
+      }
+      std::cout << std::endl;
+     }
+     std::cout << std::endl;
+     std::cout << std::endl;
+
+
+     //CMat aT(A.height,A.width);
+     //GMat dAt(A.height,A.width);
+
+     dim3 dimBlockTransA(BLOCK_SIZE, BLOCK_SIZE);
+     dim3 dimGridTransA(aT.width/dimBlockTransA.x, aT.height/dimBlockTransA.y);
+     Transpose<<<dimGridTransA,dimBlockTransA>>>(dA,dAt);
+     aT.load(dAt);
+
+     std::cout << "Transpose" << std::endl;
+     for (int i = 0; i < aT.height; i++) 
+     {
+       for (int j = 0; j < aT.width; j++) {
+        std::cout << aT.elements[i * aT.width + j];
+        std::cout << " ";
+      }
+      std::cout << std::endl;
+     }
+     std::cout << std::endl;
+     std::cout << std::endl;
+  }
+  else
+  {
+     dim3 dimBlockTransA(BLOCK_SIZE, BLOCK_SIZE);
+     dim3 dimGridTransA(A.width/dimBlockTransA.x, A.height/dimBlockTransA.y);
+     GpuCopy<<<dimGridTransA, dimBlockTransA>>>(dA,dAt);
+     aT.load(dAt);
+  }
+
+
+  // B transpose
+  if(opB)
+  {
+
+     //CMat bT(B.height,B.width);
+     //GMat dBt(B.height,B.width);
+
+     dim3 dimBlockTransB(gcd(bT.width,bT.height),gcd(bT.width,bT.width));
+     dim3 dimGridTransB(bT.width/dimBlockTransB.x, bT.height/dimBlockTransB.y);
+     Transpose<<<dimGridTransB,dimBlockTransB>>>(dB,dBt);
+     bT.load(dBt);
+  }
+  else
+  {
+     //CMat bT(B.width,B.height);
+     //GMat dBt(B.width,B.height);
+     dim3 dimBlockTransB(gcd(B.width,B.height),gcd(B.width,B.width));
+     dim3 dimGridTransB(B.width/dimBlockTransB.x, B.height/dimBlockTransB.y);
+     GpuCopy<<<dimGridTransB, dimBlockTransB>>>(dB,dBt);
+     bT.load(dBt);
+  }
+
+  // Multiply A by alpha
+  //dim3 dimBlock0(BLOCK_SIZE, BLOCK_SIZE);
+  
+  dim3 dimBlock0(gcd(aT.width,aT.height),gcd(aT.width,aT.height));
+  dim3 dimGrid0(aT.width/dimBlock0.x, aT.height/dimBlock0.y);
+  
+  MatByFloat<<<dimGrid0,dimBlock0>>>(dAt,alpha,dAt);
+  aT.load(dAt);
+  std::cout << "alpha* A" << std::endl;
+  for (int i = 0; i < aT.height; i++) 
+    {
+    for (int j = 0; j < aT.width; j++) {
+       std::cout << aT.elements[i * aT.width + j];
+       std::cout << " ";
+    }
+    std::cout << std::endl;
+  }
+   std::cout << std::endl;
+   std::cout << std::endl;
+
+
   // Multiply A and B
   dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
-  MatMulKernel<<<dimGrid, dimBlock>>>(dA, dB, dAbyB);
+  dim3 dimGrid(bT.width / dimBlock.x, aT.height / dimBlock.y);
+  MatMulKernel<<<dimGrid, dimBlock>>>(dAt, dBt, dAbyB);
 
-  D.load(dAbyB);
-  for (int i = 0; i < A.width; i++) 
+  AbyB.load(dAbyB);
+  std::cout << "A * B" << std::endl;
+  for (int i = 0; i < AbyB.height; i++) 
     {
-    for (int j = 0; j < B.height; j++) {
-       std::cout << D.elements[i * D.width + j];
+    for (int j = 0; j < AbyB.width; j++) {
+       std::cout << AbyB.elements[i * AbyB.width + j];
        std::cout << " ";
     }
     std::cout << std::endl;
@@ -205,9 +364,10 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
 
   D.load(dCbyBeta);
-  for (int i = 0; i < A.width; i++) 
+  
+  for (int i = 0; i < D.height; i++) 
     {
-    for (int j = 0; j < B.height; j++) {
+    for (int j = 0; j < D.width; j++) {
        std::cout << D.elements[i * D.width + j];
        std::cout << " ";
     }
@@ -216,16 +376,18 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
    std::cout << std::endl;
    std::cout << std::endl;
 
+
   // Add left and right side of equ
-  dim3 dimBlock3(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid3(CbyBeta.width / dimBlock.x, AbyB.height / dimBlock.y);
-  MatAdd<<<dimGrid3, dimBlock3>>>(dAbyB, dCbyBeta, dAddResult);
+  dim3 dimBlock4(BLOCK_SIZE, BLOCK_SIZE);
+  dim3 dimGrid4(CbyBeta.width / dimBlock4.x, AbyB.height / dimBlock4.y);
+  MatAdd<<<dimGrid4, dimBlock4>>>(dAbyB, dCbyBeta, dD);
+ 
 
   //C.load(dC);
-  D.load(dAddResult);
-
-  for (int i = 0; i < A.width; i++) {
-    for (int j = 0; j < B.height; j++) {
+  D.load(dD);
+  std::cout << "D = " << std::endl;
+  for (int i = 0; i < D.height; i++) {
+    for (int j = 0; j < D.width; j++) {
        std::cout << D.elements[i * D.width + j];
        std::cout << " ";
     }
@@ -304,6 +466,15 @@ int main() {
 
   CMat A(N, M, 1.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
   CMat nC(N, N);
+  CMat test(32,16,5.f);
+
+  //for (int i = 0; i < test.height; i++) {
+    //for (int j = 0; j < test.width; j++) {
+       //std::cout << test.elements[i * test.width + j];
+       //std::cout << " ";
+    //}
+    //std::cout << std::endl;
+  //}
 
 // Call matrix multiplication.
 #if 0
@@ -323,10 +494,16 @@ int main() {
 #endif
 
 
-     GEMM(1,false,A,false,B,5,C,D);
+     GEMM(2,false,A,false,B,5,C,D);
   // Naive HIP
   //NaiveMatMul(A, B, nC);
 
   // With LDS
   //MatMul(A, B, C);
+}
+
+void printMatrix(CMat A)
+{
+
+
 }
