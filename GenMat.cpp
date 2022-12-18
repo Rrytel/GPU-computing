@@ -205,8 +205,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   CMat addResult(C.width, C.height);
   GMat dAddResult(C.width, C.height);
 
-  CMat AbyB(A.width, B.height);
-  GMat dAbyB(A.width, B.height);
+  CMat AbyB(A.height, B.height);
+  GMat dAbyB(A.height, B.height);
 
   CMat CbyBeta(C.width, C.height);
   GMat dCbyBeta(C.width, C.height);
@@ -482,11 +482,14 @@ void CPUMatMul(const CMat A, const CMat B, CMat C) {
 int main() {
   // Set up matrices
   int Cpu = 0;
-  int N = 4;
-  int M = 4;
+  int N = 32;
+  int M = 16;
   int K = 4;
 
-  CMat A(N, M, 2.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
+  //CMat A(N, M, 2.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
+
+  CMat A(N,M, 2.f), B(M, N, 1.f), C(M, M), D(M,N);
+  //CMat A(2, 4, 2.f), B(4, 2, 1.f), C(4, 4,1.f), D(4,4);
   CMat nC(N, N);
   CMat test(32,16,5.f);
 
@@ -516,15 +519,15 @@ int main() {
 #endif
 
 
-     CPUMatMul(A,B,D);
-     std::cout << "CPU" << std::endl;
-     for (int i = 0; i < D.height; i++) {
-        for (int j = 0; j < D.width; j++) {
-       std::cout << D.elements[i * D.width + j];
-       std::cout << " ";
-    }
-    std::cout << std::endl;
-  }
+     //CPUMatMul(A,B,D);
+     //std::cout << "CPU" << std::endl;
+     //for (int i = 0; i < D.height; i++) {
+        //for (int j = 0; j < D.width; j++) {
+       //std::cout << D.elements[i * D.width + j];
+       //std::cout << " ";
+    //}
+    //std::cout << std::endl;
+  //}
      
      GEMM(2,false,A,false,B,5,C,D);
   // Naive HIP
