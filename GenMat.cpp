@@ -205,8 +205,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   CMat addResult(C.width, C.height);
   GMat dAddResult(C.width, C.height);
 
-  CMat AbyB(A.height, B.height);
-  GMat dAbyB(A.height, B.height);
+  CMat AbyB(B.width, A.height);
+  GMat dAbyB(B.width, A.height);
 
   CMat CbyBeta(C.width, C.height);
   GMat dCbyBeta(C.width, C.height);
@@ -309,9 +309,12 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   {
      //CMat bT(B.width,B.height);
      //GMat dBt(B.width,B.height);
-     dim3 dimBlockTransB(gcd(B.width,B.height),gcd(B.width,B.height));
-     dim3 dimGridTransB(B.width/dimBlockTransB.x, B.height/dimBlockTransB.y);
+     dim3 dimBlockTransB(33/2,33/2);
+     //dim3 dimBlockTransB(gcd(B.width,B.height),gcd(B.width,B.height));
+     std::cout << gcd(B.width, B.height);
+     dim3 dimGridTransB(B.width/dimBlockTransB.x+1, B.height/dimBlockTransB.y+1);
      GpuCopy<<<dimGridTransB, dimBlockTransB>>>(dB,dBt);
+     
      bT.load(dBt);
 
      std::cout << "B" << std::endl;
@@ -357,10 +360,12 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   blockSize = gcd(AbyB.width, AbyB.height);
   size_t size = blockSize * blockSize * sizeof(float);
   dim3 dimBlock(blockSize,blockSize);
-  dim3 dimGrid(AbyB.width / dimBlock.x, AbyB.height/ dimBlock.y);
+  //dim3 dimGrid(AbyB.height/dimBlock.y, AbyB.width/dimBlock.x);
+  dim3 dimGrid(AbyB.width/dimBlock.x, AbyB.height/dimBlock.y);
   
   
-  MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB,blockSize);
+  //MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB,blockSize);
+  NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
 
   std::cout << aT.width << " " << bT.height<< std::endl;
   std::cout << dimBlock.x<< " " << dimGrid.x << " " << dimGrid.y << std::endl;
@@ -380,17 +385,17 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   
   // Multiply C by beta
   dim3 dimBlock2(gcd(C.width,C.height),gcd(C.width,C.height));
-  dim3 dimGrid2(C.width / dimBlock.x, C.height / dimBlock.y);
+  dim3 dimGrid2(C.width / dimBlock2.x, C.height / dimBlock2.y);
   MatByFloat<<<dimGrid2, dimBlock2>>>(dC, beta, dCbyBeta);
 
 
 
-  D.load(dCbyBeta);
+  CbyBeta.load(dCbyBeta);
   
-  for (int i = 0; i < D.height; i++) 
+  for (int i = 0; i < CbyBeta.height; i++) 
     {
-    for (int j = 0; j < D.width; j++) {
-       std::cout << D.elements[i * D.width + j];
+    for (int j = 0; j < CbyBeta.width; j++) {
+       std::cout << CbyBeta.elements[i * CbyBeta.width + j];
        std::cout << " ";
     }
     std::cout << std::endl;
@@ -482,13 +487,16 @@ void CPUMatMul(const CMat A, const CMat B, CMat C) {
 int main() {
   // Set up matrices
   int Cpu = 0;
-  int N = 32;
-  int M = 16;
-  int K = 4;
+  //int N = 9;
+  //int M = 15;
+  //int K = 20;
+  int N = 666;
+  int M = 777;
+  int K = 777;
 
   //CMat A(N, M, 2.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
 
-  CMat A(N,M, 2.f), B(M, N, 1.f), C(M, M), D(M,N);
+  CMat A(N,M, 2.f), B(K, N, 1.f), C(K, M,1.f), D(K,M);
   //CMat A(2, 4, 2.f), B(4, 2, 1.f), C(4, 4,1.f), D(4,4);
   CMat nC(N, N);
   CMat test(32,16,5.f);
@@ -520,14 +528,14 @@ int main() {
 
 
      //CPUMatMul(A,B,D);
-     //std::cout << "CPU" << std::endl;
-     //for (int i = 0; i < D.height; i++) {
-        //for (int j = 0; j < D.width; j++) {
-       //std::cout << D.elements[i * D.width + j];
-       //std::cout << " ";
-    //}
-    //std::cout << std::endl;
-  //}
+     std::cout << "CPU" << std::endl;
+     for (int i = 0; i < B.height; i++) {
+        for (int j = 0; j < B.width; j++) {
+       std::cout << B.elements[i * B.width + j];
+       std::cout << " ";
+    }
+    std::cout << std::endl;
+    }
      
      GEMM(2,false,A,false,B,5,C,D);
   // Naive HIP
