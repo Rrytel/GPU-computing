@@ -205,8 +205,10 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   CMat addResult(C.width, C.height);
   GMat dAddResult(C.width, C.height);
 
-  CMat AbyB(B.width, A.height);
-  GMat dAbyB(B.width, A.height);
+  //CMat AbyB(B.width, A.height);
+  //GMat dAbyB(B.width, A.height);
+  CMat AbyB(B.width,A.height);
+  GMat dAbyB(B.width,A.height);
 
   CMat CbyBeta(C.width, C.height);
   GMat dCbyBeta(C.width, C.height);
@@ -286,7 +288,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   }
   else
   {
-     dim3 dimBlockTransA(gcd(A.width,A.height),gcd(A.width,A.height));
+     //dim3 dimBlockTransA(gcd(A.width,A.height),gcd(A.width,A.height));
+     dim3 dimBlockTransA(16,16);
      dim3 dimGridTransA(A.width/dimBlockTransA.x, A.height/dimBlockTransA.y);
      GpuCopy<<<dimGridTransA, dimBlockTransA>>>(dA,dAt);
      aT.load(dAt);
@@ -309,10 +312,11 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   {
      //CMat bT(B.width,B.height);
      //GMat dBt(B.width,B.height);
-     dim3 dimBlockTransB(33/2,33/2);
+     //dim3 dimBlockTransB(33/2,33/2);
      //dim3 dimBlockTransB(gcd(B.width,B.height),gcd(B.width,B.height));
+     dim3 dimBlockTransB(16,16);
      std::cout << gcd(B.width, B.height);
-     dim3 dimGridTransB(B.width/dimBlockTransB.x+1, B.height/dimBlockTransB.y+1);
+     dim3 dimGridTransB(B.width/dimBlockTransB.x, B.height/dimBlockTransB.y);
      GpuCopy<<<dimGridTransB, dimBlockTransB>>>(dB,dBt);
      
      bT.load(dBt);
@@ -357,15 +361,16 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   // Multiply A and B
 
   
-  blockSize = gcd(AbyB.width, AbyB.height);
-  size_t size = blockSize * blockSize * sizeof(float);
+  //blockSize = gcd(AbyB.width, AbyB.height);
+  blockSize = 1;
+  size_t size = 16 * 16 * sizeof(float);
   dim3 dimBlock(blockSize,blockSize);
   //dim3 dimGrid(AbyB.height/dimBlock.y, AbyB.width/dimBlock.x);
   dim3 dimGrid(AbyB.width/dimBlock.x, AbyB.height/dimBlock.y);
   
   
-  //MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB,blockSize);
-  NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
+  MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB,blockSize);
+  //NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
 
   std::cout << aT.width << " " << bT.height<< std::endl;
   std::cout << dimBlock.x<< " " << dimGrid.x << " " << dimGrid.y << std::endl;
@@ -392,7 +397,7 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
   CbyBeta.load(dCbyBeta);
   
-  for (int i = 0; i < CbyBeta.height; i++) 
+  /*for (int i = 0; i < CbyBeta.height; i++) 
     {
     for (int j = 0; j < CbyBeta.width; j++) {
        std::cout << CbyBeta.elements[i * CbyBeta.width + j];
@@ -403,7 +408,7 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
    std::cout << std::endl;
    std::cout << std::endl;
 
-
+  */
   // Add left and right side of equ
   dim3 dimBlock4(gcd(AbyB.width,CbyBeta.height),gcd(AbyB.width,CbyBeta.height));
   dim3 dimGrid4(CbyBeta.width / dimBlock4.x, AbyB.height / dimBlock4.y);
@@ -412,14 +417,14 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
   //C.load(dC);
   D.load(dD);
-  std::cout << "D = " << std::endl;
+  /*std::cout << "D = " << std::endl;
   for (int i = 0; i < D.height; i++) {
     for (int j = 0; j < D.width; j++) {
        std::cout << D.elements[i * D.width + j];
        std::cout << " ";
     }
     std::cout << std::endl;
-  }
+  }*/
 
 }
 
@@ -490,9 +495,9 @@ int main() {
   //int N = 9;
   //int M = 15;
   //int K = 20;
-  int N = 666;
-  int M = 777;
-  int K = 777;
+  int N = 16;
+  int M = 32;
+  int K = 48;
 
   //CMat A(N, M, 2.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
 
@@ -528,14 +533,14 @@ int main() {
 
 
      //CPUMatMul(A,B,D);
-     std::cout << "CPU" << std::endl;
-     for (int i = 0; i < B.height; i++) {
-        for (int j = 0; j < B.width; j++) {
-       std::cout << B.elements[i * B.width + j];
-       std::cout << " ";
-    }
-    std::cout << std::endl;
-    }
+     //std::cout << "CPU" << std::endl;
+     //for (int i = 0; i < B.height; i++) {
+        //for (int j = 0; j < B.width; j++) {
+       //std::cout << B.elements[i * B.width + j];
+       //std::cout << " ";
+    //}
+    //std::cout << std::endl;
+    //}
      
      GEMM(2,false,A,false,B,5,C,D);
   // Naive HIP
