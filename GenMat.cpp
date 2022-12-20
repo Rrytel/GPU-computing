@@ -41,62 +41,28 @@ int gcd(int a, int b)
    return gcd(b, a % b);
 }
 
-void MatMul(const CMat A, const CMat B, CMat C) {
-  int Gpu = 1;
-  // Load A and B to device memory
-  // Allocate Matrix C
-  GMat dA(A.width, A.height);
-  GMat dB(B.width, B.height);
-  GMat dC(C.width, C.height);
-  dA.load(A);
-  dB.load(B);
-
-  // Invoke Kernel
-  dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-  dim3 dimGrid(B.width / dimBlock.x, A.height / dimBlock.y);
-  // Use HIP Events for timing
-  hipEvent_t start, stop;
-  float time;
-  hipEventCreate(&start);
-  hipEventCreate(&stop);
-  hipEventRecord(start, 0);
-
-  //MatMulKernel<<<dimGrid, dimBlock>>>(dA, dB, dC);
-  hipEventRecord(stop, 0);
-  hipEventSynchronize(stop);
-  hipEventElapsedTime(&time, start, stop);
-  std::cout << " Shared Memory Matrix Multiplication time =" << '\t' << time
-            << "ms" << std::endl;
-
-  // Read C from Device memory
-  C.load(dC);
-
-  // Free device memory
-  dA.deAllocate();
-  dB.deAllocate();
-  dC.deAllocate();
-}
 
 // Matrix Multiplication Kernel
-__global__ void MatMulKernel(GMat A, GMat B, GMat C, int blockSize) {
+__global__ void MatMulKernel(GMat A, GMat B, GMat C) {
 
+   int trow = blockIdx.y * blockDim.y + threadIdx.y;
+   int tcol = blockIdx.x * blockDim.x + threadIdx.x;
 
-  int tcol = blockIdx.x * blockDim.x + threadIdx.x;
-  int trow = blockIdx.y * blockDim.y + threadIdx.y;
-  if (!(trow < A.height && tcol < B.width))
-  {
-	//return;
-  }
-  // Static shared memory for Asub and Bsub
-  extern __shared__  float aS[];
-  extern __shared__  float bS[]; // Great name for an array
+   if(trow > A.height || tcol > B.width)
+   {
+	return;
+   }
+
+   // Static shared memory for Asub and Bsub
+  __shared__ float aS[BLOCK_SIZE][BLOCK_SIZE];
+  __shared__ float bS[BLOCK_SIZE][BLOCK_SIZE]; // Great name for an array
 
   // Block row and column;
   int blockRow = blockIdx.y;
   int blockCol = blockIdx.x;
 
   // Thread block computes one sub matrix Csub of C
-  subMatrix cSub(C, blockSize, blockRow, blockCol);
+  subMatrix cSub(C, BLOCK_SIZE, blockRow, blockCol);
 
   // Each thread computes one element of Csub
   // By accumulating results into Cvalue
@@ -109,25 +75,25 @@ __global__ void MatMulKernel(GMat A, GMat B, GMat C, int blockSize) {
   // Loop over submatrices of A and B that are required for Csub
   // Multiply each pair of sub-matrices together
   // and summ the results
-  for (int m = 0; m < (A.width / blockSize); m++) {
+  for (int m = 0; m < (A.width / BLOCK_SIZE); m++) {
 
     // Get A submatrix
-    subMatrix aSub(A, blockSize, blockRow, m);
+    subMatrix aSub(A, BLOCK_SIZE, blockRow, m);
 
     // Get B submatrix
-    subMatrix bSub(B, blockSize, m, blockCol);
+    subMatrix bSub(B, BLOCK_SIZE, m, blockCol);
 
     // Load Asub and Bsub from global memory into shared;
 
-    aS[row * blockSize + col] = aSub.GetElem(row, col);
-    bS[row * blockSize + col] = bSub.GetElem(row, col);
+    aS[row][col] = aSub.GetElem(row, col);
+    bS[row][col] = bSub.GetElem(row, col);
 
     // Always sync threads when loading shared memory before doing computation
     __syncthreads();
 
     // Multiply the submatrices
-    for (int e = 0; e < blockSize; e++)
-      cValue += aS[row * blockSize + e] * bS[e * blockSize + col];
+    for (int e = 0; e < BLOCK_SIZE; e++)
+      cValue += aS[row][e] * bS[e][col];
 
     // synchronize to make sure all threads are done computing
     __syncthreads();
@@ -364,13 +330,13 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   //blockSize = gcd(AbyB.width, AbyB.height);
   blockSize = 1;
   size_t size = 16 * 16 * sizeof(float);
-  dim3 dimBlock(blockSize,blockSize);
+  dim3 dimBlock(BLOCK_SIZE,BLOCK_SIZE);
   //dim3 dimGrid(AbyB.height/dimBlock.y, AbyB.width/dimBlock.x);
   dim3 dimGrid(AbyB.width/dimBlock.x, AbyB.height/dimBlock.y);
   
   
-  MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB,blockSize);
-  //NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
+  //MatMulKernel<<<dimGrid, dimBlock, size>>>(dAt, dBt, dAbyB);
+  NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
 
   std::cout << aT.width << " " << bT.height<< std::endl;
   std::cout << dimBlock.x<< " " << dimGrid.x << " " << dimGrid.y << std::endl;
@@ -505,53 +471,7 @@ int main() {
   //CMat A(2, 4, 2.f), B(4, 2, 1.f), C(4, 4,1.f), D(4,4);
   CMat nC(N, N);
   CMat test(32,16,5.f);
-
-  //for (int i = 0; i < test.height; i++) {
-    //for (int j = 0; j < test.width; j++) {
-       //std::cout << test.elements[i * test.width + j];
-       //std::cout << " ";
-    //}
-    //std::cout << std::endl;
-  //}
-
-// Call matrix multiplication.
-#if 0
-    CMat Ds(N, N), D(N,N);
-//Serial 
-	clock_t sstart = clock();	//Serial Start
-	serialMatMul(A,B,Ds);
-	clock_t send = clock(); 	//Serial End
-	double serial = double(send - sstart) / CLOCKS_PER_SEC;	
-	std::cout<< " Serial Time = " << serial << "s" << std::endl;
-//OpenMP
-	clock_t begin = clock();	
-	CPUMatMul(A,B,D);
-	clock_t end = clock();
-	double fullcpu = double(end - begin) / (CLOCKS_PER_SEC*12);
-	std::cout<< " CPU Time = " << fullcpu << "s" << std::endl;
-#endif
-
-
-     //CPUMatMul(A,B,D);
-     //std::cout << "CPU" << std::endl;
-     //for (int i = 0; i < B.height; i++) {
-        //for (int j = 0; j < B.width; j++) {
-       //std::cout << B.elements[i * B.width + j];
-       //std::cout << " ";
-    //}
-    //std::cout << std::endl;
-    //}
      
-     GEMM(2,false,A,false,B,5,C,D);
-  // Naive HIP
-  //NaiveMatMul(A, B, nC);
-
-  // With LDS
-  //MatMul(A, B, C);
-}
-
-void printMatrix(CMat A)
-{
-
+  GEMM(2,false,A,false,B,5,C,D);
 
 }
