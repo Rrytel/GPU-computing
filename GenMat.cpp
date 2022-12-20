@@ -50,7 +50,7 @@ __global__ void MatMulKernel(GMat A, GMat B, GMat C) {
 
    if(trow > A.height || tcol > B.width)
    {
-	return;
+	//return;
    }
 
    // Static shared memory for Asub and Bsub
@@ -153,7 +153,7 @@ __global__ void GpuCopy(GMat A, GMat C)
    C.elements[row * C.width + col] =  A.elements[row * A.width + col];
 }
 
-void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const CMat B, const int beta, const CMat C, CMat D)
+void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const CMat B, const int beta, const CMat C, CMat &D)
 {
 
 
@@ -281,8 +281,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
      //dim3 dimBlockTransB(33/2,33/2);
      //dim3 dimBlockTransB(gcd(B.width,B.height),gcd(B.width,B.height));
      dim3 dimBlockTransB(16,16);
-     std::cout << gcd(B.width, B.height);
-     dim3 dimGridTransB(B.width/dimBlockTransB.x, B.height/dimBlockTransB.y);
+     std::cout << B.width << " " << B.height;
+     dim3 dimGridTransB(B.width/dimBlockTransB.x+1, B.height/dimBlockTransB.y+1);
      GpuCopy<<<dimGridTransB, dimBlockTransB>>>(dB,dBt);
      
      bT.load(dBt);
@@ -301,8 +301,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   }
 
   // Multiply A by alpha
-  int blockSize = gcd(aT.width, aT.height);
-  dim3 dimBlock0(blockSize, blockSize);
+  //int blockSize = gcd(aT.width, aT.height);
+  dim3 dimBlock0(16, 16);
   
   //dim3 dimBlock0(gcd(aT.width,aT.height),gcd(aT.width,aT.height));
   dim3 dimGrid0(aT.width/dimBlock0.x, aT.height/dimBlock0.y);
@@ -328,7 +328,7 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
   
   //blockSize = gcd(AbyB.width, AbyB.height);
-  blockSize = 1;
+  //blockSize = 1;
   size_t size = 16 * 16 * sizeof(float);
   dim3 dimBlock(BLOCK_SIZE,BLOCK_SIZE);
   //dim3 dimGrid(AbyB.height/dimBlock.y, AbyB.width/dimBlock.x);
@@ -355,15 +355,15 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
    std::cout << std::endl;
   
   // Multiply C by beta
-  dim3 dimBlock2(gcd(C.width,C.height),gcd(C.width,C.height));
+  dim3 dimBlock2(BLOCK_SIZE,BLOCK_SIZE);
   dim3 dimGrid2(C.width / dimBlock2.x, C.height / dimBlock2.y);
   MatByFloat<<<dimGrid2, dimBlock2>>>(dC, beta, dCbyBeta);
 
 
 
   CbyBeta.load(dCbyBeta);
-  
-  /*for (int i = 0; i < CbyBeta.height; i++) 
+  std::cout << "C * beta" << std::endl;
+  for (int i = 0; i < CbyBeta.height; i++) 
     {
     for (int j = 0; j < CbyBeta.width; j++) {
        std::cout << CbyBeta.elements[i * CbyBeta.width + j];
@@ -374,23 +374,34 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
    std::cout << std::endl;
    std::cout << std::endl;
 
-  */
+  
   // Add left and right side of equ
-  dim3 dimBlock4(gcd(AbyB.width,CbyBeta.height),gcd(AbyB.width,CbyBeta.height));
+  dim3 dimBlock4(BLOCK_SIZE,BLOCK_SIZE);
   dim3 dimGrid4(CbyBeta.width / dimBlock4.x, AbyB.height / dimBlock4.y);
   MatAdd<<<dimGrid4, dimBlock4>>>(dAbyB, dCbyBeta, dD);
  
 
   //C.load(dC);
   D.load(dD);
-  /*std::cout << "D = " << std::endl;
+  std::cout << "D = " << std::endl;
   for (int i = 0; i < D.height; i++) {
     for (int j = 0; j < D.width; j++) {
-       std::cout << D.elements[i * D.width + j];
-       std::cout << " ";
+       if(D.elements[i*D.width+j]!=0){
+           std::cout << D.elements[i * D.width + j];
+           std::cout << " ";
+	}
+       
     }
-    std::cout << std::endl;
-  }*/
+    if(D.elements[i*D.width] == 0)
+    {
+
+    }
+    else
+    {
+       std::cout << std::endl;
+    }
+    
+  }
 
 }
 
@@ -454,24 +465,94 @@ void CPUMatMul(const CMat A, const CMat B, CMat C) {
   }
 }
 
+
+void CPUPad(CMat &A, int size)
+{
+  CMat temp(A.width, A.height);
+  temp.copy(A);
+  A.width = size;
+  A.height = size;
+  A.resize();
+
+  for(int j=0; j<temp.height; j++)
+  {
+	for(int i=0; i<temp.width; i++)
+        {
+		
+                //std::cout << temp.elements[j*temp.width+i] << " ";
+	}
+        //std::cout << std::endl;
+  }
+  //std::cout << std::endl;
+  //std::cout << std::endl;
+
+  for(int row=0; row<size; row++)
+  {
+	for(int col=0; col<size; col++)
+        {
+                if(row > temp.height-1 || col > temp.width-1)
+                {
+		   A.elements[row*A.width + col] = 0;
+		}
+                else
+                {
+		   A.elements[row*A.width + col] = temp.elements[row*temp.width+col];
+                }
+	}
+  }
+
+}
+
 // Main program
 int main() {
   // Set up matrices
   int Cpu = 0;
-  //int N = 9;
-  //int M = 15;
-  //int K = 20;
-  int N = 16;
-  int M = 32;
-  int K = 48;
+  int N = 3000;
+  int M = 666;
+  int K = 777;
+  //int N = 16;
+  //int M = 32;
+  //int K = 49;
 
   //CMat A(N, M, 2.f), B(M, K, 1.f), C(N, K,1.f), D(N,K);
 
   CMat A(N,M, 2.f), B(K, N, 1.f), C(K, M,1.f), D(K,M);
   //CMat A(2, 4, 2.f), B(4, 2, 1.f), C(4, 4,1.f), D(4,4);
+
+  //A.width = 64;
+  //A.height = 64;
+  //B.width = 64;
+  //B.height = 64;
+  //D.width = 64;
+  //D.height = 64;
+
+
+
+
+  int padNum = std::max(N,std::max(N,K));
+  while(padNum%16!=0)
+  {
+	padNum++;
+  }
+  
+  CPUPad(A,padNum);
+  CPUPad(B,padNum);
+  CPUPad(C,padNum);
+  CPUPad(D,padNum);
   CMat nC(N, N);
   CMat test(32,16,5.f);
-     
+  
+  
+  for(int j=0; j<A.height; j++)
+  {
+	for(int i=0; i<A.width; i++)
+        {
+		//A.elements[j*A.width + i] = j;
+                //std::cout << A.elements[j*A.width+i] << " ";
+	}
+        //std::cout << std::endl;
+  }
+  
   GEMM(2,false,A,false,B,5,C,D);
 
 }
