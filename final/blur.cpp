@@ -30,6 +30,8 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
    	int row = blockIdx.y * blockDim.y + threadIdx.y;
    	int col = blockIdx.x * blockDim.x + threadIdx.x;
    	float3 pixelValue;
+        int tempU = 0;
+        int tempV = 0;
    	pixelValue.x = 0.0f;
    	pixelValue.y = 0.0f;
    	pixelValue.z = 0.0f;
@@ -37,9 +39,47 @@ __global__ void BlurrKernel(const unsigned char *in, int width, int height, cons
    	if(row == 0 || row == height-1 || col == 0 || col == width-1)
    	{
       	  //Load rgb pixel values for: input[row][col]
-      	  pixelValue.x = (float)(in[row * width + col]);
-          pixelValue.y = (float)(in[(row + height) * width + col]);
-          pixelValue.z = (float)(in[(row + height*2) * width + col]);
+      	  //pixelValue.x = (float)(in[row * width + col]);
+          //pixelValue.y = (float)(in[(row + height) * width + col]);
+          //pixelValue.z = (float)(in[(row + height*2) * width + col]);
+
+          for(int u = -1; u < 2; u ++)
+          {
+            for(int v = -1; v < 2; v++)
+            {
+              //Row out of bounds
+              if((row+u) < 0)
+              {
+                 tempU = 0;
+              }
+              else if((row+u) > (height - 1))
+              {
+                 tempU = height-1;
+              }
+              else
+              {
+             	 tempU = row + u;
+              }
+	      
+              //Col out of bounds
+              if((col+v) < 0)
+              {
+                 tempV = 0;
+              }
+              else if((col+v) > (width - 1))
+	      {
+		 tempV = width-1;
+              }
+              else
+              {
+             	 tempV = col + v;
+              }
+              //Enumerate rgb pixel values for: input[row+u][col+v]*Filter[u+1][v+1]
+              pixelValue.x += (float)(in[(tempU) * width + (tempV)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+              pixelValue.y += (float)(in[((tempU) + height) * width + (tempV)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+              pixelValue.z += (float)(in[((tempU) + height*2) * width + (tempV)])*Filter.elements[(u+1)*Filter.width+(v+1)];
+            }
+          }
        
    	}
    	else
@@ -369,9 +409,10 @@ int main() {
    
 
      //Blurr(dSrc,width,height,RD,dOut);
-   //Blurr(dSrc,width,height,Filter,dOut);
+   Blurr(dSrc,width,height,Filter,dOut);
    //Blurr(dSrc,width,height,Sharp,dOut);
-   Blurr(dSrc,width,height,GB5,dOut); 
+
+   //Blurr(dSrc,width,height,GB5,dOut); 
    Blurr(dOut,width,height,UM,dOut);    
 
    hipMemcpy(hOut, dOut, size, hipMemcpyDeviceToHost);
