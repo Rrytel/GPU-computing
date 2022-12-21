@@ -8,6 +8,7 @@
 #include <omp.h>
 #include <stdio.h>
 #include <numeric>
+#include <cublas_v2.h>
 
 /* Use Matrix Class! */
 #include "mat.h"
@@ -200,6 +201,14 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
  
   // D = alpha * opA (A) * opB (B) + beta(C)
+  // Use hipEvent type for timing
+
+  hipEvent_t start, stop;
+  float elapsedSecs;
+  hipEventCreate(&start);
+  hipEventCreate(&stop);
+  hipEventRecord(start, 0);
+
 
   // A transpose
   if(opA)
@@ -248,8 +257,8 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   dim3 dimBlock0(BLOCK_SIZE, BLOCK_SIZE);
   dim3 dimGrid0(aT.width/dimBlock0.x, aT.height/dimBlock0.y);
   MatByFloat<<<dimGrid0,dimBlock0>>>(dAt,alpha,dAt);
-  aT.load(dAt);
 
+  //aT.load(dAt);
   //std::cout << "A * Alpha" << std::endl;
   //PrintMatrix(aT);
 
@@ -261,7 +270,7 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   //NaiveKernel<<<dimGrid, dimBlock>>>(dAt,dBt, dAbyB);
 
 
-  AbyB.load(dAbyB);
+  //AbyB.load(dAbyB);
   //std::cout<< "A * B" << std::endl;
   //PrintMatrix(AbyB);
   
@@ -272,7 +281,7 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
 
 
 
-  CbyBeta.load(dCbyBeta);
+  //CbyBeta.load(dCbyBeta);
   //std::cout << "C * beta" << std::endl;
   //PrintMatrix(CbyBeta);
 
@@ -281,9 +290,16 @@ void GEMM(const int alpha, const bool opA, const CMat A, const bool opB, const C
   dim3 dimBlock4(BLOCK_SIZE,BLOCK_SIZE);
   dim3 dimGrid4(CbyBeta.width / dimBlock4.x, AbyB.height / dimBlock4.y);
   MatAdd<<<dimGrid4, dimBlock4>>>(dAbyB, dCbyBeta, dD);
+
+  NaiveKernel<<<dimGrid, dimBlock>>>(dA, dB, dC);
+  hipEventRecord(stop, 0);
+  hipEventSynchronize(stop);
+  hipEventElapsedTime(&elapsedSecs, start, stop);
+  std::cout << "GEMM Time = " << elapsedSecs << "ms" << std::endl;
  
+  /*
   D.load(dD);
-  /*std::cout << "D = " << std::endl;
+  std::cout << "D = " << std::endl;
   for (int i = 0; i < D.height; i++) {
     for (int j = 0; j < D.width; j++) {
        if(D.elements[i*D.width+j]!=0){
@@ -390,9 +406,42 @@ void PrintMatrix(CMat A)
    std::cout << std::endl;
 }
 
+void gpu_blas_mmul(const float *A, const float *B, float *C, const int m, const int k, const int n) {
+  int lda=m,ldb=k,ldc=m;
+  const float alf = 1;
+  const float bet = 0;
+  const float *alpha = &alf;
+  const float *beta = &bet;
+  
+  // Create a handle for CUBLAS
+  cublasHandle_t handle;
+  cublasCreate(&handle);
+  
+  // Do the actual multiplication
+  hipEvent_t start2, stop2;
+  float elapsedSecs2;
+  hipEventCreate(&start2);
+  hipEventCreate(&stop2);
+  hipEventRecord(start2, 0); 
+  cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+  hipEventRecord(stop2, 0);
+  hipEventSynchronize(stop2);
+  hipEventElapsedTime(&elapsedSecs2, start2, stop2);
+  std::cout << "cublas Time = " << elapsedSecs2 << "ms" << std::endl;
+  
+  // Destroy the handle
+  cublasDestroy(handle);
+}
+
 // Main program
 int main() {
   // Set up matrices
+  //int N = 4;
+  //int M = 5;
+  //int K = 6;
+  //int N = 16;
+  //int M = 32;
+  //int K = 49;
   int temp = 2048;
   int N=temp,M=temp,K=temp;
 
@@ -413,19 +462,32 @@ int main() {
   CPUPad(D,padNum);
 
 
-
-  // Use hipEvent type for timing
-
-  hipEvent_t start, stop;
-  float elapsedSecs;
-  hipEventCreate(&start);
-  hipEventCreate(&stop);
-  hipEventRecord(start, 0);  
   GEMM(1,false,A,false,B,1,C,D);
-  hipEventRecord(stop, 0);
-  hipEventSynchronize(stop);
-  hipEventElapsedTime(&elapsedSecs, start, stop);
-  std::cout << "GEMM Time = " << elapsedSecs << "ms" << std::endl;
+
+  int nr_rows_A, nr_cols_A, nr_rows_B, nr_cols_B, nr_rows_C, nr_cols_C;
+  nr_rows_A = nr_cols_A = nr_rows_B = nr_cols_B = nr_rows_C = nr_cols_C = temp;
+  float *h_A = (float *)malloc(nr_rows_A * nr_cols_A * sizeof(float));
+  float *h_B = (float *)malloc(nr_rows_B * nr_cols_B * sizeof(float));
+  float *h_C = (float *)malloc(nr_rows_C * nr_cols_C * sizeof(float));
+ 
+  float *d_A, *d_B, *d_C;
+  cudaMalloc(&d_A,nr_rows_A * nr_cols_A * sizeof(float));
+  cudaMalloc(&d_B,nr_rows_B * nr_cols_B * sizeof(float));
+  cudaMalloc(&d_C,nr_rows_C * nr_cols_C * sizeof(float));
+
+ 
+  gpu_blas_mmul(d_A, d_B, d_C, nr_rows_A, nr_cols_A, nr_cols_B);
+
+
+  cudaFree(d_A);
+  cudaFree(d_B);
+  cudaFree(d_C);
+  
+  // Free CPU memory
+  free(h_A);
+  free(h_B);
+  free(h_C);
+  
 
   return 0;
 
