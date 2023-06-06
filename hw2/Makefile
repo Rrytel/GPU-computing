@@ -1,5 +1,5 @@
 C = hipcc
-CFLAGS = -std=c++11
+CFLAGS = -std=c++11 -fopenmp
 
 all: matmul 
 
