@@ -204,7 +204,7 @@ int main() {
   std::cout<< " Serial Time = " << serial*1000 << "ms" << std::endl;
   std::cout <<"First element of serial MatVec"<<":" <<nC2.elements[0] << std::endl;
  
-  NaiveMatVec(A2,B2,nC2);
+  //NaiveMatVec(A2,B2,nC2);
   MatVec(A2,B2,nC2);
   std::cout << std::endl;
 
